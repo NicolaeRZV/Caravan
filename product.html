@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Product - Firma Protectie Geamuri</title>
+  <link rel="stylesheet" href="assets/css/styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="container header-inner">
+      <a href="index.html" class="logo">
+        <img src="assets/img/logo.svg" alt="Logo">
+        <span>Firma Protectie Geamuri</span>
+      </a>
+      <nav class="main-nav" aria-label="Primary">
+        <button class="nav-toggle" aria-expanded="false" aria-controls="nav-menu">☰</button>
+        <ul id="nav-menu">
+          <li><a href="index.html">Home</a></li>
+          <li><a href="about.html">About</a></li>
+          <li><a class="active" href="products.html">Products</a></li>
+          <li><a href="gallery.html">Gallery</a></li>
+          <li><a href="blog.html">Blog</a></li>
+          <li><a href="contact.html">Contact</a></li>
+        </ul>
+      </nav>
+      <div class="header-cta">
+        <a class="btn btn-primary" href="contact.html">Get a Quote</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="container page">
+    <section class="product-detail" id="product-root">
+      <div class="product-media">
+        <div class="slider">
+          <img id="product-image" src="" alt="Product image" loading="lazy">
+        </div>
+      </div>
+      <div class="product-info">
+        <h1 id="product-title">Product</h1>
+        <p id="product-desc">Loading...</p>
+        <ul id="product-features" class="bullet-list"></ul>
+        <div class="tech-specs">
+          <span class="badge" id="product-badge">In stock</span>
+          <h3>Technical Specs</h3>
+          <table id="product-specs" class="spec-table"></table>
+        </div>
+        <div class="product-cta">
+          <div class="price-large" id="product-price"></div>
+          <a class="btn btn-primary" href="contact.html">Request a Quote</a>
+          <span class="note">Ships in 2–4 days</span>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-grid">
+      <div class="footer-brand">
+        <a href="index.html" class="logo small">
+          <img src="assets/img/logo.svg" alt="Logo">
+          <span>Firma Protectie Geamuri</span>
+        </a>
+        <p>Durable protection for caravan windows.</p>
+      </div>
+      <nav class="footer-links" aria-label="Footer">
+        <h4>Quick Links</h4>
+        <ul>
+          <li><a href="index.html">Home</a></li>
+          <li><a href="about.html">About</a></li>
+          <li><a href="products.html">Products</a></li>
+          <li><a href="gallery.html">Gallery</a></li>
+          <li><a href="blog.html">Blog</a></li>
+          <li><a href="contact.html">Contact</a></li>
+        </ul>
+      </nav>
+      <div class="footer-meta">
+        <h4>Contact</h4>
+        <ul class="contact-list">
+          <li><a href="tel:+40123456789">+40 123 456 789</a></li>
+          <li><a href="mailto:info@firmaprotectiegeamuri.ro">info@firmaprotectiegeamuri.ro</a></li>
+        </ul>
+        <div class="socials">
+          <a aria-label="Facebook" href="#">📘</a>
+          <a aria-label="Instagram" href="#">📸</a>
+          <a aria-label="YouTube" href="#">▶️</a>
+        </div>
+        <p class="copyright">© <span id="year"></span> Firma Protectie Geamuri.</p>
+      </div>
+    </div>
+  </footer>
+
+  <script src="assets/js/main.js"></script>
+  <script>
+    (function(){
+      const params = new URLSearchParams(window.location.search);
+      const sku = params.get('sku') || 'covers';
+      const db = {
+        covers: {
+          title: 'Protective Window Covers',
+          image: 'https://images.unsplash.com/photo-1528909514045-2fa4ac7a08ba?q=80&w=1400&auto=format&fit=crop',
+          desc: 'Rugged, lightweight covers designed to shield caravan windows from debris, weather, and UV.',
+          price: '€149.00',
+          features: [
+            'Impact-resistant composite material',
+            'Quick-mount clips and secure fit',
+            'Weather-sealed edges',
+            'Model-specific sizing'
+          ],
+          specs: {
+            Material: 'Polycarbonate composite',
+            Thickness: '4 mm',
+            Weight: '1.2 kg (front cover typical)',
+            Warranty: '24 months'
+          }
+        },
+        films: {
+          title: 'UV Window Films & Tints',
+          image: 'https://images.unsplash.com/photo-1520975922284-9e0ce827f2c4?q=80&w=1400&auto=format&fit=crop',
+          desc: 'High-performance films reducing glare, heat, and UV penetration while improving privacy.',
+          price: '€89.00',
+          features: [
+            'Up to 99% UV rejection',
+            'Multiple tint levels',
+            'Scratch-resistant coating',
+            'Professional or DIY install'
+          ],
+          specs: {
+            UV_Protection: '≥ 99%',
+            Visible_Light_Transmission: '20% / 35% / 50%',
+            Warranty: '36 months'
+          }
+        },
+        custom: {
+          title: 'Custom Fit Solutions',
+          image: 'https://images.unsplash.com/photo-1497215842964-222b430dc094?q=80&w=1400&auto=format&fit=crop',
+          desc: 'Precision kits tailored for your caravan model, ensuring the best protection and look.',
+          price: 'Custom – Request a Quote',
+          features: [
+            'CAD-based measurements',
+            'Edge-to-edge coverage',
+            'Choice of finishes',
+            'Installation available'
+          ],
+          specs: {
+            Fitment: 'Model-specific',
+            Lead_Time: '7-14 days',
+            Warranty: '24 months'
+          }
+        },
+        install: {
+          title: 'Installation Services',
+          image: 'https://images.unsplash.com/photo-1581091012178-1e7e1794a32b?q=80&w=1400&auto=format&fit=crop',
+          desc: 'Professional installation, calibration, and aftercare by certified technicians.',
+          price: 'from €59.00',
+          features: [
+            'On-site or workshop service',
+            'Calibrated tools and methods',
+            'Aftercare guidance',
+            'Warranty-backed work'
+          ],
+          specs: {
+            Coverage: 'Regional',
+            Duration: '1-3 hours',
+            Warranty: '12 months'
+          }
+        }
+      };
+
+      const data = db[sku] || db.covers;
+      document.getElementById('product-title').textContent = data.title;
+      const imgEl = document.getElementById('product-image');
+      imgEl.src = data.image; imgEl.alt = data.title;
+      document.getElementById('product-desc').textContent = data.desc;
+      document.getElementById('product-price').textContent = data.price;
+
+      const feat = document.getElementById('product-features');
+      feat.innerHTML = data.features.map(f => `<li>${f}</li>`).join('');
+
+      const specsTable = document.getElementById('product-specs');
+      specsTable.innerHTML = Object.entries(data.specs).map(([k,v]) => `<tr><th>${k.replaceAll('_',' ')}</th><td>${v}</td></tr>`).join('');
+
+      const badge = document.getElementById('product-badge');
+      if(sku === 'custom' || sku === 'install'){ badge.textContent = 'Made to order'; } else { badge.textContent = 'In stock'; }
+    })();
+  </script>
+</body>
+</html> 
