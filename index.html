@@ -1,196 +1,182 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Firma Protectie Geamuri - Caravan Window Protection</title>
-  <meta name="description" content="Protect your caravan windows with durable, custom-fit covers, films, and professional installation. Travel safe, travel smart.">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="icon" href="assets/img/favicon.svg">
-  <link rel="stylesheet" href="assets/css/styles.css">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AUSF - Association</title>
+    <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <!-- Header -->
-  <header class="site-header">
-    <div class="container header-inner">
-      <a href="index.html" class="logo">
-        <img src="assets/img/logo.svg" alt="Firma Protectie Geamuri logo" />
-        <span>Firma Protectie Geamuri</span>
-      </a>
-      <nav class="main-nav" aria-label="Primary">
-        <button class="nav-toggle" aria-expanded="false" aria-controls="nav-menu">☰</button>
-        <ul id="nav-menu">
-          <li><a class="active" href="index.html">Home</a></li>
-          <li><a href="about.html">About</a></li>
-          <li><a href="products.html">Products</a></li>
-          <li><a href="gallery.html">Gallery</a></li>
-          <li><a href="blog.html">Blog</a></li>
-          <li><a href="contact.html">Contact</a></li>
-        </ul>
-      </nav>
-      <div class="header-cta">
-        <a class="btn btn-primary" href="products.html">Shop Now</a>
-      </div>
-    </div>
-  </header>
-
-  <!-- Hero -->
-  <section class="hero" role="banner" style="--hero-image:url('https://images.unsplash.com/photo-1560692830-5f4f3e85f3ed?q=80&w=2000&auto=format&fit=crop');">
-    <div class="container hero-inner">
-      <h1>Protect Your Caravan Windows – Travel Safe, Travel Smart</h1>
-      <p class="subtitle">Durable, custom-fit solutions for peace of mind on every journey.</p>
-      <div class="hero-ctas">
-        <a class="btn btn-primary" href="products.html">Shop Now</a>
-        <a class="btn btn-ghost" href="about.html">Learn More</a>
-      </div>
-    </div>
-  </section>
-
-  <!-- Highlights -->
-  <section class="highlights">
     <div class="container">
-      <ul class="feature-list">
-        <li>
-          <div class="icon" aria-hidden="true">🛡️</div>
-          <h3>Shatter-Resistant</h3>
-          <p>Engineered to help prevent cracks, chips, and costly replacements.</p>
-        </li>
-        <li>
-          <div class="icon" aria-hidden="true">🌤️</div>
-          <h3>UV & Weather Guard</h3>
-          <p>Defends against UV rays, wind, and rain for year-round protection.</p>
-        </li>
-        <li>
-          <div class="icon" aria-hidden="true">🔧</div>
-          <h3>Easy to Install</h3>
-          <p>DIY-friendly with clear instructions and support if you need it.</p>
-        </li>
-        <li>
-          <div class="icon" aria-hidden="true">📐</div>
-          <h3>Custom Fit</h3>
-          <p>Tailored for your caravan model to ensure a secure, sleek fit.</p>
-        </li>
-      </ul>
-    </div>
-  </section>
+        <header>
+            <h1 class="logo">AUSF</h1>
+            <p class="tagline">Association Activities & Management</p>
+        </header>
 
-  <!-- Featured Products -->
-  <section class="featured-products">
-    <div class="container">
-      <div class="section-head">
-        <h2>Featured Products</h2>
-        <a class="link" href="products.html">View all products →</a>
-      </div>
-      <div class="card-grid">
-        <article class="card">
-          <img src="https://images.unsplash.com/photo-1528909514045-2fa4ac7a08ba?q=80&w=1200&auto=format&fit=crop" alt="Protective Window Covers">
-          <div class="card-body">
-            <h3>Protective Window Covers</h3>
-            <p>Rugged, lightweight Shields for front and side caravan windows.</p>
-            <a class="btn btn-secondary" href="product.html?sku=covers">View Product</a>
-          </div>
-        </article>
-        <article class="card">
-          <img src="https://images.unsplash.com/photo-1520975922284-9e0ce827f2c4?q=80&w=1200&auto=format&fit=crop" alt="UV Window Films & Tints">
-          <div class="card-body">
-            <h3>Window Films & Tints</h3>
-            <p>Reduce glare and heat gain while enhancing privacy and safety.</p>
-            <a class="btn btn-secondary" href="product.html?sku=films">View Product</a>
-          </div>
-        </article>
-        <article class="card">
-          <img src="https://images.unsplash.com/photo-1497215842964-222b430dc094?q=80&w=1200&auto=format&fit=crop" alt="Custom Fit Solutions">
-          <div class="card-body">
-            <h3>Custom Fit Solutions</h3>
-            <p>Precision-made kits for specific caravan models and window sizes.</p>
-            <a class="btn btn-secondary" href="product.html?sku=custom">View Product</a>
-          </div>
-        </article>
-      </div>
-    </div>
-  </section>
+        <nav class="tabs">
+            <button class="tab-btn active" data-tab="current-activities">Current Activities</button>
+            <button class="tab-btn" data-tab="my-activities">My Activities</button>
+            <button class="tab-btn" data-tab="total-hours">Total Hours</button>
+            <button class="tab-btn" data-tab="payments">Payments</button>
+        </nav>
 
-  <!-- Testimonials -->
-  <section class="testimonials">
-    <div class="container">
-      <h2>What Our Customers Say</h2>
-      <div class="testimonial-carousel" data-autorotate="6000">
-        <article class="testimonial active">
-          <div class="stars" aria-label="5 out of 5 stars">★★★★★</div>
-          <p>“Our road trip was stress-free knowing our windows were protected. Installation was quick!”</p>
-          <div class="person">
-            <img src="https://images.unsplash.com/photo-1544005313-94ddf0286df2?q=80&w=300&auto=format&fit=crop" alt="Customer Emma">
-            <span>Emma & Daniel</span>
-          </div>
-        </article>
-        <article class="testimonial">
-          <div class="stars" aria-label="5 out of 5 stars">★★★★★</div>
-          <p>“Excellent quality and fit for our model. The UV film made summer travel much cooler.”</p>
-          <div class="person">
-            <img src="https://images.unsplash.com/photo-1547425260-76bcadfb4f2c?q=80&w=300&auto=format&fit=crop" alt="Customer Alex">
-            <span>Alex P.</span>
-          </div>
-        </article>
-        <article class="testimonial">
-          <div class="stars" aria-label="5 out of 5 stars">★★★★★</div>
-          <p>“Customer service is top-notch. They helped us select the perfect custom kit.”</p>
-          <div class="person">
-            <img src="https://images.unsplash.com/photo-1542326237-94b1c5a5382e?q=80&w=300&auto=format&fit=crop" alt="Customer Maria">
-            <span>Maria G.</span>
-          </div>
-        </article>
-      </div>
-    </div>
-  </section>
-
-  <!-- CTA Strip -->
-  <section class="cta-strip">
-    <div class="container cta-strip-inner">
-      <h3>Travel with confidence. Protect your caravan windows today!</h3>
-      <a class="btn btn-primary" href="contact.html">Get a Free Quote</a>
-    </div>
-  </section>
-
-  <!-- Footer -->
-  <footer class="site-footer">
-    <div class="container footer-grid">
-      <div class="footer-brand">
-        <a href="index.html" class="logo small">
-          <img src="assets/img/logo.svg" alt="Firma Protectie Geamuri logo">
-          <span>Firma Protectie Geamuri</span>
-        </a>
-        <p>Durable protection for caravan windows. Travel safe, travel smart.</p>
-      </div>
-      <nav class="footer-links" aria-label="Footer">
-        <h4>Quick Links</h4>
-        <ul>
-          <li><a href="index.html">Home</a></li>
-          <li><a href="about.html">About</a></li>
-          <li><a href="products.html">Products</a></li>
-          <li><a href="gallery.html">Gallery</a></li>
-          <li><a href="blog.html">Blog</a></li>
-          <li><a href="contact.html">Contact</a></li>
-        </ul>
-      </nav>
-      <div class="footer-meta">
-        <h4>Contact</h4>
-        <ul class="contact-list">
-          <li><a href="tel:+40123456789">+40 123 456 789</a></li>
-          <li><a href="mailto:info@firmaprotectiegeamuri.ro">info@firmaprotectiegeamuri.ro</a></li>
-        </ul>
-        <div class="socials">
-          <a aria-label="Facebook" href="#">📘</a>
-          <a aria-label="Instagram" href="#">📸</a>
-          <a aria-label="YouTube" href="#">▶️</a>
+        <!-- Current Activities Tab -->
+        <div class="tab-content active" id="current-activities">
+            <div class="content-box">
+                <div class="section-header">
+                    <h2>Current Activities Hosted</h2>
+                    <p class="section-subtitle">Manage activities organized by the association</p>
+                </div>
+                <div class="activities-container">
+                    <div class="activities-grid" id="current-activities-list">
+                        <!-- Activities will be populated here -->
+                    </div>
+                </div>
+                <div class="action-box">
+                    <button class="add-btn" id="add-current-activity">
+                        <span class="btn-icon">+</span>
+                        <span>Add New Activity</span>
+                    </button>
+                </div>
+            </div>
         </div>
-        <a class="link small" href="#">Warranty & Returns Policy</a>
-        <p class="copyright">© <span id="year"></span> Firma Protectie Geamuri. All rights reserved.</p>
-      </div>
-    </div>
-  </footer>
 
-  <script src="assets/js/main.js"></script>
+        <!-- My Activities Tab -->
+        <div class="tab-content" id="my-activities">
+            <div class="content-box">
+                <div class="section-header">
+                    <h2>Activities I'm Participating In</h2>
+                    <p class="section-subtitle">Track your personal activity participation</p>
+                </div>
+                <div class="activities-container">
+                    <div class="activities-grid" id="my-activities-list">
+                        <!-- Activities will be populated here -->
+                    </div>
+                </div>
+                <div class="action-box">
+                    <button class="add-btn" id="add-my-activity">
+                        <span class="btn-icon">+</span>
+                        <span>Join Activity</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Total Hours Tab -->
+        <div class="tab-content" id="total-hours">
+            <div class="content-box">
+                <div class="section-header">
+                    <h2>Total Hours Participated</h2>
+                    <p class="section-subtitle">View your total participation hours</p>
+                </div>
+                <div class="stats-box">
+                    <div class="hours-card">
+                        <div class="card-icon">⏱️</div>
+                        <div class="hours-number" id="total-hours-display">0</div>
+                        <div class="hours-label">Total Hours</div>
+                    </div>
+                </div>
+                <div class="breakdown-box">
+                    <div class="box-header">
+                        <h3>Hours Breakdown</h3>
+                    </div>
+                    <div class="breakdown-content" id="hours-breakdown">
+                        <!-- Hours breakdown will be shown here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Payments Tab -->
+        <div class="tab-content" id="payments">
+            <div class="content-box">
+                <div class="section-header">
+                    <h2>Payment Tracking</h2>
+                    <p class="section-subtitle">Manage and track your payments</p>
+                </div>
+                <div class="stats-box">
+                    <div class="payment-card">
+                        <div class="card-icon">💰</div>
+                        <div class="payment-amount" id="total-paid">€0.00</div>
+                        <div class="payment-label">Total Paid</div>
+                    </div>
+                </div>
+                <div class="form-box">
+                    <div class="box-header">
+                        <h3>Record New Payment</h3>
+                        <p class="box-subtitle">Add a new payment to your record</p>
+                    </div>
+                    <form id="payment-form">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="payment-amount">
+                                    <span class="label-icon">€</span>
+                                    Amount
+                                </label>
+                                <input type="number" id="payment-amount" step="0.01" min="0" placeholder="0.00" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="payment-date">
+                                    <span class="label-icon">📅</span>
+                                    Date
+                                </label>
+                                <input type="date" id="payment-date" required>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="payment-description">
+                                <span class="label-icon">📝</span>
+                                Description
+                            </label>
+                            <input type="text" id="payment-description" placeholder="e.g., Membership fee, Activity fee">
+                        </div>
+                        <button type="submit" class="submit-btn">
+                            <span>Add Payment</span>
+                            <span class="btn-arrow">→</span>
+                        </button>
+                    </form>
+                </div>
+                <div class="history-box">
+                    <div class="box-header">
+                        <h3>Payment History</h3>
+                        <p class="box-subtitle">All your recorded payments</p>
+                    </div>
+                    <div class="history-content" id="payment-list">
+                        <!-- Payment history will be shown here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for adding activities -->
+    <div class="modal" id="activity-modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h2 id="modal-title">Add Activity</h2>
+            <form id="activity-form">
+                <div class="form-group">
+                    <label for="activity-name">Activity Name</label>
+                    <input type="text" id="activity-name" required>
+                </div>
+                <div class="form-group">
+                    <label for="activity-description">Description</label>
+                    <textarea id="activity-description" rows="3"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="activity-date">Date</label>
+                    <input type="date" id="activity-date" required>
+                </div>
+                <div class="form-group">
+                    <label for="activity-hours">Hours</label>
+                    <input type="number" id="activity-hours" step="0.5" min="0" required>
+                </div>
+                <button type="submit" class="submit-btn">Add Activity</button>
+            </form>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
 </body>
-</html> 
+</html>
+
