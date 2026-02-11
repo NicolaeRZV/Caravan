@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AUSF - Sign In</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1 class="logo">
+                <span class="logo-text">Un strop de fericire</span>
+                <span class="sun-icon">☀️</span>
+            </h1>
+            <p class="tagline">AUSF - Sign In</p>
+        </header>
+
+        <div class="content-box" style="max-width: 420px; margin: 40px auto;">
+            <div class="section-header">
+                <h2 id="auth-title">Sign In</h2>
+                <p class="section-subtitle">Access your AUSF activities dashboard</p>
+            </div>
+
+            <form id="login-form">
+                <div class="form-group" id="auth-name-group" style="display: none;">
+                    <label for="auth-name">Name</label>
+                    <input type="text" id="auth-name" placeholder="Your name">
+                </div>
+                <div class="form-group">
+                    <label for="auth-email">Email</label>
+                    <input type="email" id="auth-email" placeholder="you@example.com" required>
+                </div>
+                <div class="form-group">
+                    <label for="auth-password">Password</label>
+                    <input type="password" id="auth-password" placeholder="Your password" required>
+                </div>
+                <div id="auth-error" style="color: #d32f2f; margin-bottom: 10px; font-size: 14px;"></div>
+                <button type="submit" class="submit-btn" id="auth-submit-btn">Sign In</button>
+            </form>
+
+            <div style="margin-top: 16px; font-size: 14px; text-align: center;">
+                <span id="auth-helper-text">Don't have an account? Create one.</span>
+                <button id="toggle-auth-mode" style="border: none; background: none; color: #2563eb; cursor: pointer; font-weight: 500; margin-left: 4px;">
+                    Sign up
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script src="auth.js"></script>
+</body>
+</html>
+
+

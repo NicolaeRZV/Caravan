@@ -5,9 +5,58 @@ let payments = [];
 let selectedActivityForJoin = null;
 let joinedActivityIds = []; // Track which activity IDs the user has joined
 
+const AUTH_STORAGE_KEY = 'ausf_auth';
+
+// Get current logged-in user from localStorage
+function getCurrentUser() {
+    const raw = localStorage.getItem(AUTH_STORAGE_KEY);
+    if (!raw) return null;
+    try {
+        const data = JSON.parse(raw);
+        return data && data.user ? data.user : null;
+    } catch (e) {
+        console.error('Failed to parse auth data', e);
+        return null;
+    }
+}
+
+// Redirect to login page if not authenticated
+function requireAuth() {
+    const user = getCurrentUser();
+    if (!user) {
+        window.location.href = 'login.html';
+        return null;
+    }
+    return user;
+}
+
+// Global logout handler (can be used from HTML onclick)
+function handleLogout() {
+    localStorage.removeItem(AUTH_STORAGE_KEY);
+    localStorage.removeItem('ausf_joinedActivityIds');
+    // Optionally clear payments as well, but keep for now
+    window.location.href = 'login.html';
+}
+
+// Expose logout globally for inline handlers
+window.handleLogout = handleLogout;
+
+// Setup header UI with user email
+function setupAuthUI(user) {
+    const emailEl = document.getElementById('user-email');
+    if (emailEl && user.email) {
+        emailEl.textContent = user.email;
+    }
+}
+
 // Initialize
-document.addEventListener('DOMContentLoaded', () => {
-    loadData();
+document.addEventListener('DOMContentLoaded', async () => {
+    const user = requireAuth();
+    if (!user) return;
+
+    setupAuthUI(user);
+
+    await loadData();
     setupTabs();
     setupForms();
     renderAll();
@@ -96,6 +145,81 @@ const SUPABASE_URL = "https://gtkxleuxhjcmxagfctgb.supabase.co";
 const SUPABASE_KEY = "sb_publishable_EFavNA6eM6-uC4FaHTsZNA_3ZlqOVYc";
 // IMPORTANT: table name must match exactly what exists in Supabase (case-sensitive)
 const SUPABASE_ACTIVITY_TABLE = "Activitati";
+const SUPABASE_VOLUNTEER_TABLE = "Voluntari";
+
+// Sync volunteer total hours to Supabase (table: Voluntari)
+async function syncVolunteerHoursToSupabase(totalHours) {
+    const user = getCurrentUser();
+    if (!user || !user.email) return;
+
+    const email = user.email;
+    const name = (user.user_metadata && (user.user_metadata.name || user.user_metadata.full_name)) || email;
+
+    try {
+        // 1) Check if volunteer already exists by email
+        const checkRes = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_VOLUNTEER_TABLE}?Email=eq.${encodeURIComponent(email)}&select=*`, {
+            method: 'GET',
+            headers: {
+                'apikey': SUPABASE_KEY,
+                'Authorization': `Bearer ${SUPABASE_KEY}`,
+                'Content-Type': 'application/json',
+            },
+        });
+
+        if (!checkRes.ok) {
+            const text = await checkRes.text();
+            console.error('Failed to check Voluntari', checkRes.status, text);
+            return;
+        }
+
+        const rows = await checkRes.json();
+        const payload = {
+            NumeComplet: name,
+            Email: email,
+            OreVoluntariat: totalHours
+        };
+
+        if (rows.length > 0) {
+            // 2) Update existing row
+            const existing = rows[0];
+            const id = existing.id;
+
+            const updateRes = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_VOLUNTEER_TABLE}?id=eq.${id}`, {
+                method: 'PATCH',
+                headers: {
+                    'apikey': SUPABASE_KEY,
+                    'Authorization': `Bearer ${SUPABASE_KEY}`,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(payload)
+            });
+
+            if (!updateRes.ok) {
+                const text = await updateRes.text();
+                console.error('Failed to update Voluntari', updateRes.status, text);
+            }
+        } else {
+            // 3) Create new volunteer row
+            const insertRes = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_VOLUNTEER_TABLE}?select=*`, {
+                method: 'POST',
+                headers: {
+                    'apikey': SUPABASE_KEY,
+                    'Authorization': `Bearer ${SUPABASE_KEY}`,
+                    'Content-Type': 'application/json',
+                    'Prefer': 'return=representation'
+                },
+                body: JSON.stringify(payload)
+            });
+
+            if (!insertRes.ok) {
+                const text = await insertRes.text();
+                console.error('Failed to insert Voluntari', insertRes.status, text);
+            }
+        }
+    } catch (err) {
+        console.error('Error syncing volunteer hours to Supabase', err);
+    }
+}
 
 // Sync activity to Supabase REST (table: Activitati)
 async function syncActivityToSupabase(type, activity) {
@@ -293,6 +417,11 @@ async function confirmJoinActivity() {
     
     // Re-render
     renderAll();
+
+    // Sync volunteer hours after join
+    const totalHours = calculateTotalHours();
+    syncVolunteerHoursToSupabase(totalHours);
+
     closeJoinModal();
 }
 
@@ -400,6 +529,10 @@ async function deleteActivity(type, id) {
     }
 
     renderAll();
+
+    // Sync volunteer hours after unjoin/delete
+    const totalHours = calculateTotalHours();
+    syncVolunteerHoursToSupabase(totalHours);
 }
 
 // Add payment
@@ -445,6 +578,11 @@ function renderAll() {
     renderMyActivities();
     renderTotalHours();
     renderPayments();
+
+    // Also make sure volunteer hours are synced when UI renders,
+    // e.g., on initial load after activities are loaded.
+    const totalHours = calculateTotalHours();
+    syncVolunteerHoursToSupabase(totalHours);
 }
 
 // Render current activities
