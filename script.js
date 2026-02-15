@@ -4,6 +4,8 @@ let myActivities = [];
 let payments = [];
 let selectedActivityForJoin = null;
 let joinedActivityIds = []; // Track which activity IDs the user has joined
+let userPrivilegii = null; // Rank from Voluntari (Privilegii column)
+let isOwner = false; // true when Privilegii === "Owner"
 
 const AUTH_STORAGE_KEY = 'ausf_auth';
 
@@ -41,11 +43,41 @@ function handleLogout() {
 // Expose logout globally for inline handlers
 window.handleLogout = handleLogout;
 
-// Setup header UI with user email
-function setupAuthUI(user) {
+// Fetch volunteer Privilegii (Rank) from Voluntari by email
+async function fetchVolunteerPrivilegii(email) {
+    if (!email) return null;
+    try {
+        const res = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_VOLUNTEER_TABLE}?Email=eq.${encodeURIComponent(email)}&select=Privilegii`, {
+            method: 'GET',
+            headers: {
+                'apikey': SUPABASE_KEY,
+                'Authorization': `Bearer ${SUPABASE_KEY}`,
+                'Content-Type': 'application/json',
+            },
+        });
+        if (!res.ok) return null;
+        const rows = await res.json();
+        return rows.length > 0 && rows[0].Privilegii != null ? rows[0].Privilegii : null;
+    } catch (err) {
+        console.error('Error fetching Privilegii from Voluntari', err);
+        return null;
+    }
+}
+
+// Setup header UI with user email and Rank from Privilegii
+async function setupAuthUI(user) {
     const emailEl = document.getElementById('user-email');
+    const rankEl = document.getElementById('user-rank');
     if (emailEl && user.email) {
         emailEl.textContent = user.email;
+    }
+    userPrivilegii = await fetchVolunteerPrivilegii(user?.email || '');
+    isOwner = userPrivilegii === 'Owner';
+    if (rankEl && userPrivilegii) {
+        rankEl.textContent = userPrivilegii;
+        rankEl.style.display = '';
+    } else if (rankEl) {
+        rankEl.style.display = 'none';
     }
 }
 
@@ -54,7 +86,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const user = requireAuth();
     if (!user) return;
 
-    setupAuthUI(user);
+    await setupAuthUI(user);
 
     await loadData();
     setupTabs();
@@ -286,13 +318,16 @@ function setupTabs() {
 
 // Setup forms
 function setupForms() {
-    // Add current activity
-    document.getElementById('add-current-activity').addEventListener('click', () => {
-        openActivityModal('current');
+    // Owner-only: Add New Activity - hide if not Owner (Join Activity stays visible for all)
+    const addCurrentBtn = document.getElementById('add-current-activity');
+    const addCurrentBox = addCurrentBtn?.closest('.action-box');
+    if (!isOwner) {
+        addCurrentBox?.style.setProperty('display', 'none');
+    }
+    addCurrentBtn?.addEventListener('click', () => {
+        if (isOwner) openActivityModal('current');
     });
-
-    // Add my activity - open join modal instead
-    document.getElementById('add-my-activity').addEventListener('click', () => {
+    document.getElementById('add-my-activity')?.addEventListener('click', () => {
         openJoinActivityModal();
     });
 
@@ -596,7 +631,7 @@ function renderCurrentActivities() {
 
     container.innerHTML = currentActivities.map(activity => `
         <div class="activity-card">
-            <button class="delete-btn" onclick="deleteActivity('current', ${activity.supabase_id || activity.id})" title="Delete">×</button>
+            ${isOwner ? `<button class="delete-btn" onclick="deleteActivity('current', ${activity.supabase_id || activity.id})" title="Delete">×</button>` : ''}
             <h3>${escapeHtml(activity.name)}</h3>
             ${activity.description ? `<p>${escapeHtml(activity.description)}</p>` : ''}
             ${activity.location ? `<div class="activity-location">📍 ${escapeHtml(activity.location)}</div>` : ''}
@@ -618,7 +653,7 @@ function renderMyActivities() {
 
     container.innerHTML = myActivities.map(activity => `
         <div class="activity-card">
-            <button class="delete-btn" onclick="deleteActivity('my', ${activity.my_activity_id || activity.id})" title="Delete">×</button>
+            <button class="delete-btn" onclick="deleteActivity('my', ${activity.my_activity_id || activity.id})" title="Leave activity">×</button>
             <h3>${escapeHtml(activity.name)}</h3>
             ${activity.description ? `<p>${escapeHtml(activity.description)}</p>` : ''}
             ${activity.location ? `<div class="activity-location">📍 ${escapeHtml(activity.location)}</div>` : ''}

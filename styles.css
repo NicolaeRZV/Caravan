@@ -72,6 +72,15 @@ header {
     color: var(--dark-gray);
 }
 
+.user-rank {
+    font-size: 0.8rem;
+    color: var(--primary-green);
+    font-weight: 600;
+    padding: 2px 8px;
+    background: var(--light-green);
+    border-radius: 6px;
+}
+
 .logout-btn {
     background: transparent;
     border: 1px solid var(--bright-green);
@@ -101,47 +110,14 @@ header::before {
     z-index: 0;
 }
 
-.logo {
-    font-size: 3.2rem;
-    font-weight: 700;
-    margin-bottom: 15px;
-    letter-spacing: 1px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 15px;
+.header-logo {
+    display: block;
+    margin: 0 auto;
+    max-width: 280px;
+    width: 100%;
+    height: auto;
     position: relative;
     z-index: 1;
-    font-style: italic;
-}
-
-.logo-text {
-    color: var(--bright-green);
-    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.2);
-}
-
-.sun-icon {
-    font-size: 3.5rem;
-    filter: drop-shadow(2px 2px 4px rgba(0, 0, 0, 0.2));
-    animation: rotate 20s linear infinite;
-}
-
-@keyframes rotate {
-    from {
-        transform: rotate(0deg);
-    }
-    to {
-        transform: rotate(360deg);
-    }
-}
-
-.tagline {
-    font-size: 1.2rem;
-    opacity: 0.95;
-    font-weight: 500;
-    position: relative;
-    z-index: 1;
-    letter-spacing: 1px;
 }
 
 nav.tabs {
@@ -773,22 +749,8 @@ h3 {
         padding: 30px 20px;
     }
 
-    .logo {
-        font-size: 2rem;
-        flex-direction: column;
-        gap: 10px;
-    }
-
-    .logo-text {
-        font-size: 1.8rem;
-    }
-
-    .sun-icon {
-        font-size: 2.5rem;
-    }
-
-    .tagline {
-        font-size: 1rem;
+    .header-logo {
+        max-width: 220px;
     }
 
     nav.tabs {
@@ -926,20 +888,8 @@ h3 {
         padding: 25px 15px;
     }
 
-    .logo {
-        font-size: 1.6rem;
-    }
-
-    .logo-text {
-        font-size: 1.5rem;
-    }
-
-    .sun-icon {
-        font-size: 2rem;
-    }
-
-    .tagline {
-        font-size: 0.9rem;
+    .header-logo {
+        max-width: 180px;
     }
 
     nav.tabs {
