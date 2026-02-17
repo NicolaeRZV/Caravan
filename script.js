@@ -43,6 +43,23 @@ function handleLogout() {
 // Expose logout globally for inline handlers
 window.handleLogout = handleLogout;
 
+// Global loading overlay helpers
+function showLoading(message) {
+    const overlay = document.getElementById('loading-overlay');
+    if (!overlay) return;
+    overlay.classList.add('active');
+    const textEl = overlay.querySelector('.loading-text');
+    if (textEl && message) {
+        textEl.textContent = message;
+    }
+}
+
+function hideLoading() {
+    const overlay = document.getElementById('loading-overlay');
+    if (!overlay) return;
+    overlay.classList.remove('active');
+}
+
 // Fetch volunteer Privilegii (Rank) from Voluntari by email
 async function fetchVolunteerPrivilegii(email) {
     if (!email) return null;
@@ -134,17 +151,26 @@ async function loadActivitiesFromSupabase() {
         const rows = await res.json();
 
         // Map Supabase rows back into our in-memory format
-        currentActivities = rows.map(row => ({
-            id: row.id || Date.now(),
-            name: row.Nume || '',
-            description: row.Descriere || '',
-            date: row.Data || new Date().toISOString().split('T')[0],
-            hours: parseFloat(row.Ore) || 0,
-            organiser: row.Organizatori || '',
-            location: row.Locatie || '',
-            timeInterval: row["Ora Organizarii"] || '', // Time interval when activity is hosted
-            supabase_id: row.id
-        }));
+        currentActivities = rows.map(row => {
+            const participantsText = row.Participanti || '';
+            const participantList = participantsText
+                ? participantsText.split(',').map(p => p.trim()).filter(Boolean)
+                : [];
+
+            return {
+                id: row.id || Date.now(),
+                name: row.Nume || '',
+                description: row.Descriere || '',
+                date: row.Data || new Date().toISOString().split('T')[0],
+                hours: parseFloat(row.Ore) || 0,
+                organiser: row.Organizatori || '',
+                location: row.Locatie || '',
+                timeInterval: row["Ora Organizarii"] || '', // Time interval when activity is hosted
+                supabase_id: row.id,
+                participantsText,
+                participantsCount: new Set(participantList).size
+            };
+        });
         
         // Rebuild myActivities after loading currentActivities
         buildMyActivities();
@@ -296,6 +322,89 @@ async function syncActivityToSupabase(type, activity) {
     }
 }
 
+// Add current user as participant to an activity (table: Activitati, column: Participanti)
+async function addParticipantToActivitySupabase(activity) {
+    const user = getCurrentUser();
+    if (!user || !activity || !activity.supabase_id) return;
+
+    const displayName =
+        (user.user_metadata && (user.user_metadata.name || user.user_metadata.full_name)) ||
+        user.email ||
+        null;
+
+    if (!displayName) return;
+
+    try {
+        const existingText = activity.participantsText || '';
+        const list = existingText
+            ? existingText.split(',').map(p => p.trim()).filter(Boolean)
+            : [];
+
+        if (!list.includes(displayName)) {
+            list.push(displayName);
+        }
+
+        const updatedText = list.join(', ');
+
+        const patchRes = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_ACTIVITY_TABLE}?id=eq.${activity.supabase_id}`, {
+            method: 'PATCH',
+            headers: {
+                'apikey': SUPABASE_KEY,
+                'Authorization': `Bearer ${SUPABASE_KEY}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ Participanti: updatedText })
+        });
+
+        if (!patchRes.ok) {
+            const text = await patchRes.text();
+            console.error('Failed to update Participanti', patchRes.status, text);
+        }
+    } catch (err) {
+        console.error('Error updating Participanti in Supabase', err);
+    }
+}
+
+// Remove current user from activity participants when they leave
+async function removeParticipantFromActivitySupabase(activity) {
+    const user = getCurrentUser();
+    if (!user || !activity || !activity.supabase_id) return;
+
+    const displayName =
+        (user.user_metadata && (user.user_metadata.name || user.user_metadata.full_name)) ||
+        user.email ||
+        null;
+
+    if (!displayName) return;
+
+    try {
+        const existingText = activity.participantsText || '';
+        const list = existingText
+            ? existingText.split(',').map(p => p.trim()).filter(Boolean)
+            : [];
+
+        const filtered = list.filter(name => name !== displayName);
+        const updatedText = filtered.join(', ');
+
+        const patchRes = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_ACTIVITY_TABLE}?id=eq.${activity.supabase_id}`, {
+            method: 'PATCH',
+            headers: {
+                'apikey': SUPABASE_KEY,
+                'Authorization': `Bearer ${SUPABASE_KEY}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ Participanti: updatedText })
+        });
+
+        if (!patchRes.ok) {
+            const text = await patchRes.text();
+            console.error('Failed to update Participanti after removal', patchRes.status, text);
+        }
+    } catch (err) {
+        console.error('Error removing participant from Supabase', err);
+    }
+}
+
 // Tab switching
 function setupTabs() {
     const tabButtons = document.querySelectorAll('.tab-btn');
@@ -400,6 +509,9 @@ function openJoinActivityModal() {
             <div class="activity-date">📅 ${formatDate(activity.date)}</div>
             ${activity.timeInterval ? `<div class="activity-time">🕐 ${escapeHtml(activity.timeInterval)}</div>` : ''}
             <div class="activity-hours" style="margin-top: 8px; font-weight: bold;">⏱️ ${activity.hours || 0} hours</div>
+            <div class="activity-participants">
+                👥 ${activity.participantsCount || 0} participant${(activity.participantsCount || 0) === 1 ? '' : 's'}
+            </div>
         </div>
     `).join('');
     
@@ -441,23 +553,25 @@ async function confirmJoinActivity() {
         return;
     }
     
-    // Add to joined list (hours come from the activity's Ore field in Supabase)
-    joinedActivityIds.push(selectedActivityForJoin.supabase_id);
-    
-    // Save joined IDs
-    saveData();
-    
-    // Rebuild myActivities (will use the activity's Ore from Supabase)
-    buildMyActivities();
-    
-    // Re-render
-    renderAll();
+    showLoading('Joining activity...');
+    try {
+        // Add to joined list (hours come from the activity's Ore field in Supabase)
+        joinedActivityIds.push(selectedActivityForJoin.supabase_id);
+        
+        // Save joined IDs
+        saveData();
 
-    // Sync volunteer hours after join
-    const totalHours = calculateTotalHours();
-    syncVolunteerHoursToSupabase(totalHours);
+        // Add current user to the activity's participants pool in Supabase
+        await addParticipantToActivitySupabase(selectedActivityForJoin);
 
-    closeJoinModal();
+        // Reload activities so participant counts and myActivities stay in sync
+        await loadActivitiesFromSupabase();
+        renderAll();
+
+        closeJoinModal();
+    } finally {
+        hideLoading();
+    }
 }
 
 // Close join modal
@@ -559,7 +673,9 @@ async function deleteActivity(type, id) {
         if (activity && activity.supabase_id) {
             joinedActivityIds = joinedActivityIds.filter(joinedId => joinedId !== activity.supabase_id);
             saveData();
-            buildMyActivities();
+            // Also remove user from participants pool for this activity
+            await removeParticipantFromActivitySupabase(activity);
+            await loadActivitiesFromSupabase();
         }
     }
 
@@ -638,6 +754,9 @@ function renderCurrentActivities() {
             ${activity.organiser ? `<div class="activity-organiser">👤 ${escapeHtml(activity.organiser)}</div>` : ''}
             <div class="activity-date">📅 ${formatDate(activity.date)}</div>
             ${activity.timeInterval ? `<div class="activity-time">🕐 ${escapeHtml(activity.timeInterval)}</div>` : ''}
+            <div class="activity-participants">
+                👥 ${activity.participantsCount || 0} participant${(activity.participantsCount || 0) === 1 ? '' : 's'}
+            </div>
         </div>
     `).join('');
 }
@@ -661,6 +780,9 @@ function renderMyActivities() {
             <div class="activity-date">📅 ${formatDate(activity.date)}</div>
             ${activity.timeInterval ? `<div class="activity-time">🕐 ${escapeHtml(activity.timeInterval)}</div>` : ''}
             <div class="activity-hours">${activity.hours || 0} hours</div>
+            <div class="activity-participants">
+                👥 ${activity.participantsCount || 0} participant${(activity.participantsCount || 0) === 1 ? '' : 's'}
+            </div>
         </div>
     `).join('');
 }
