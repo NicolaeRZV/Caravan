@@ -3,6 +3,23 @@ const SUPABASE_URL = "https://gtkxleuxhjcmxagfctgb.supabase.co";
 const SUPABASE_KEY = "sb_publishable_EFavNA6eM6-uC4FaHTsZNA_3ZlqOVYc";
 const AUTH_STORAGE_KEY = "ausf_auth";
 
+// Loading overlay helpers for auth page
+function showLoading(message) {
+  const overlay = document.getElementById("loading-overlay");
+  if (!overlay) return;
+  overlay.classList.add("active");
+  const textEl = overlay.querySelector(".loading-text");
+  if (textEl && message) {
+    textEl.textContent = message;
+  }
+}
+
+function hideLoading() {
+  const overlay = document.getElementById("loading-overlay");
+  if (!overlay) return;
+  overlay.classList.remove("active");
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   const loginForm = document.getElementById("login-form");
   const toggleModeBtn = document.getElementById("toggle-auth-mode");
@@ -72,17 +89,21 @@ document.addEventListener("DOMContentLoaded", () => {
 
     try {
       if (mode === "signin") {
+        showLoading("Signing in...");
         await signIn(email, password);
       } else {
         if (!name) {
           errorEl.textContent = "Please enter your name.";
           return;
         }
+        showLoading("Creating account...");
         await signUp(email, password, name);
       }
     } catch (err) {
       console.error("Auth error", err);
       errorEl.textContent = "Something went wrong. Please try again.";
+    } finally {
+      hideLoading();
     }
   });
 

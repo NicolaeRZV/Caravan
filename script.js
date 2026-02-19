@@ -617,15 +617,20 @@ async function addActivity(type) {
         timeInterval: timeInterval || ''
     };
 
-    // Sync to Supabase
-    const supaResult = await syncActivityToSupabase(type, activity);
-    if (supaResult && supaResult.id) {
-        // Reload activities from Supabase to get the latest
-        await loadActivitiesFromSupabase();
-        renderAll();
-        closeModal();
-    } else {
-        alert('Failed to add activity. Please try again.');
+    showLoading('Adding activity...');
+    try {
+        // Sync to Supabase
+        const supaResult = await syncActivityToSupabase(type, activity);
+        if (supaResult && supaResult.id) {
+            // Reload activities from Supabase to get the latest
+            await loadActivitiesFromSupabase();
+            renderAll();
+            closeModal();
+        } else {
+            alert('Failed to add activity. Please try again.');
+        }
+    } finally {
+        hideLoading();
     }
 }
 
@@ -657,33 +662,38 @@ async function deleteActivityFromSupabase(supabaseId) {
 
 // Delete activity
 async function deleteActivity(type, id) {
-    if (type === 'current') {
-        // Delete hosted activity from Supabase
-        const activity = currentActivities.find(a => a.id === id || a.supabase_id === id);
-        if (activity && activity.supabase_id) {
-            await deleteActivityFromSupabase(activity.supabase_id);
-            // Also remove from joined list if it was joined
-            joinedActivityIds = joinedActivityIds.filter(joinedId => joinedId !== activity.supabase_id);
-            saveData();
-            await loadActivitiesFromSupabase();
+    showLoading('Deleting activity...');
+    try {
+        if (type === 'current') {
+            // Delete hosted activity from Supabase
+            const activity = currentActivities.find(a => a.id === id || a.supabase_id === id);
+            if (activity && activity.supabase_id) {
+                await deleteActivityFromSupabase(activity.supabase_id);
+                // Also remove from joined list if it was joined
+                joinedActivityIds = joinedActivityIds.filter(joinedId => joinedId !== activity.supabase_id);
+                saveData();
+                await loadActivitiesFromSupabase();
+            }
+        } else {
+            // Remove from joined list (don't delete from Supabase, just unjoin)
+            const activity = myActivities.find(a => a.id === id || a.my_activity_id === id);
+            if (activity && activity.supabase_id) {
+                joinedActivityIds = joinedActivityIds.filter(joinedId => joinedId !== activity.supabase_id);
+                saveData();
+                // Also remove user from participants pool for this activity
+                await removeParticipantFromActivitySupabase(activity);
+                await loadActivitiesFromSupabase();
+            }
         }
-    } else {
-        // Remove from joined list (don't delete from Supabase, just unjoin)
-        const activity = myActivities.find(a => a.id === id || a.my_activity_id === id);
-        if (activity && activity.supabase_id) {
-            joinedActivityIds = joinedActivityIds.filter(joinedId => joinedId !== activity.supabase_id);
-            saveData();
-            // Also remove user from participants pool for this activity
-            await removeParticipantFromActivitySupabase(activity);
-            await loadActivitiesFromSupabase();
-        }
+
+        renderAll();
+
+        // Sync volunteer hours after unjoin/delete
+        const totalHours = calculateTotalHours();
+        syncVolunteerHoursToSupabase(totalHours);
+    } finally {
+        hideLoading();
     }
-
-    renderAll();
-
-    // Sync volunteer hours after unjoin/delete
-    const totalHours = calculateTotalHours();
-    syncVolunteerHoursToSupabase(totalHours);
 }
 
 // Add payment
