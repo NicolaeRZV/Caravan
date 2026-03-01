@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Un strop de fericire - AUSF</title>
-    <link rel="stylesheet" href="styles.css?v=2">
+    <link rel="stylesheet" href="styles.css?v=3">
 </head>
 <body>
     <div class="container">
@@ -19,10 +19,12 @@
         </div>
 
         <nav class="tabs">
-            <button class="tab-btn active" data-tab="current-activities">Currentt Activities</button>
+            <button class="tab-btn active" data-tab="current-activities">Current Activities</button>
             <button class="tab-btn" data-tab="my-activities">My Activities</button>
+            <button class="tab-btn" data-tab="checklist">Checklist</button>
             <button class="tab-btn" data-tab="total-hours">Total Hours</button>
             <button class="tab-btn" data-tab="payments">Payments</button>
+            <button class="tab-btn owner-only" data-tab="volunteer-stats">Volunteer Stats</button>
         </nav>
 
         <!-- Current Activities Tab -->
@@ -67,6 +69,44 @@
             </div>
         </div>
 
+        <!-- Checklist Tab -->
+        <div class="tab-content" id="checklist">
+            <div class="content-box">
+                <div class="section-header">
+                    <h2>Checklist Activities</h2>
+                    <p class="section-subtitle">These tasks are completed automatically when you join linked activities</p>
+                </div>
+                <div class="history-box">
+                    <div class="box-header">
+                        <h3>My Checklist</h3>
+                        <p class="box-subtitle">A green check means you have already completed that task</p>
+                    </div>
+                    <div class="history-content" id="checklist-list">
+                        <!-- Checklist activities will be rendered here -->
+                    </div>
+                </div>
+                <div class="form-box owner-only" id="checklist-owner-box">
+                    <div class="box-header">
+                        <h3>Add Checklist Activity</h3>
+                        <p class="box-subtitle">Only owners can manage checklist activities</p>
+                    </div>
+                    <form id="checklist-form">
+                        <div class="form-group">
+                            <label for="checklist-name">
+                                <span class="label-icon">✔️</span>
+                                Activity name
+                            </label>
+                            <input type="text" id="checklist-name" placeholder="e.g., Complete onboarding form" required>
+                        </div>
+                        <button type="submit" class="submit-btn">
+                            <span>Add Checklist Activity</span>
+                            <span class="btn-arrow">→</span>
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+
         <!-- Total Hours Tab -->
         <div class="tab-content" id="total-hours">
             <div class="content-box">
@@ -79,6 +119,18 @@
                         <div class="card-icon">⏱️</div>
                         <div class="hours-number" id="total-hours-display">0</div>
                         <div class="hours-label">Total Hours</div>
+                    </div>
+                </div>
+                <div class="progress-box">
+                    <div class="box-header">
+                        <h3>Progress to 120 Hours</h3>
+                        <p class="box-subtitle">Track how close you are to the 120-hour goal</p>
+                    </div>
+                    <div class="progress-bar-wrapper">
+                        <div class="progress-bar-track">
+                            <div class="progress-bar-fill" id="hours-progress-fill"></div>
+                        </div>
+                        <div class="progress-bar-label" id="hours-progress-label">0 / 120 hours (0%)</div>
                     </div>
                 </div>
                 <div class="breakdown-box">
@@ -152,6 +204,55 @@
                 </div>
             </div>
         </div>
+
+        <!-- Owner-only Volunteer Stats Tab -->
+        <div class="tab-content owner-only" id="volunteer-stats">
+            <div class="content-box">
+                <div class="section-header">
+                    <h2>Volunteer Statistics</h2>
+                    <p class="section-subtitle">Overview of all registered volunteers</p>
+                </div>
+                <div class="history-box">
+                    <div class="box-header">
+                        <h3>All Volunteers</h3>
+                        <p class="box-subtitle">Search and filter all registered volunteers</p>
+                        <div class="form-row" style="margin-top: 12px;">
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label for="volunteer-search">
+                                    <span class="label-icon">🔍</span>
+                                    Search by name or email
+                                </label>
+                                <input type="text" id="volunteer-search" placeholder="Type a name or email...">
+                            </div>
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label for="volunteer-rank-filter">
+                                    <span class="label-icon">⭐</span>
+                                    Filter by rank
+                                </label>
+                                <select id="volunteer-rank-filter" class="volunteer-rank-select volunteer-rank-filter-select">
+                                    <option value="">All ranks</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="form-row" style="margin-top: 8px;">
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label for="volunteer-rank-add-input">
+                                    <span class="label-icon">➕</span>
+                                    Add new rank
+                                </label>
+                                <div class="volunteer-rank-add-row">
+                                    <input type="text" id="volunteer-rank-add-input" placeholder="e.g., Coordinator, Manager" />
+                                    <button type="button" id="volunteer-rank-add-btn" class="volunteer-rank-add-btn">Add</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="history-content" id="volunteer-stats-content">
+                        <!-- Volunteer stats will be rendered here -->
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- Modal for adding activities -->
@@ -188,6 +289,26 @@
                     <label for="activity-time-interval">Ora Organizarii (Time Interval)</label>
                     <input type="text" id="activity-time-interval" placeholder="e.g., 10:00 - 12:00">
                 </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="activity-is-checklist-special">
+                            <span class="label-icon">✨</span>
+                            Link to checklist activity
+                        </label>
+                        <input type="checkbox" id="activity-is-checklist-special">
+                    </div>
+                    <div class="form-group checklist-search-wrapper">
+                        <label for="activity-checklist-search">
+                            <span class="label-icon">🏷️</span>
+                            Checklist task
+                        </label>
+                        <div class="checklist-combobox">
+                            <input type="text" id="activity-checklist-search" placeholder="Search checklist tasks..." disabled autocomplete="off">
+                            <input type="hidden" id="activity-checklist-value" value="">
+                            <div class="checklist-dropdown" id="activity-checklist-dropdown" role="listbox"></div>
+                        </div>
+                    </div>
+                </div>
                 <button type="submit" class="submit-btn">Add Activity</button>
             </form>
         </div>
@@ -206,13 +327,24 @@
         </div>
     </div>
 
+    <!-- Modal for viewing participants -->
+    <div class="modal" id="participants-modal">
+        <div class="modal-content">
+            <span class="close" id="close-participants-modal">&times;</span>
+            <h2>Participants</h2>
+            <div id="participants-list">
+                <!-- Participants will be listed here -->
+            </div>
+        </div>
+    </div>
+
     <!-- Global loading overlay -->
     <div id="loading-overlay" class="loading-overlay">
         <div class="loading-spinner"></div>
         <p class="loading-text">Processing...</p>
     </div>
 
-    <script src="script.js?v=2"></script>
+    <script src="script.js?v=3"></script>
 </body>
 </html>
 

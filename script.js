@@ -6,6 +6,10 @@ let selectedActivityForJoin = null;
 let joinedActivityIds = []; // Track which activity IDs the user has joined
 let userPrivilegii = null; // Rank from Voluntari (Privilegii column)
 let isOwner = false; // true when Privilegii === "Owner"
+let allVolunteers = []; // Loaded only for Owner in stats tab
+let availableVolunteerRanks = []; // All known rank values for owner UI
+let checklistActivities = []; // Activities from ChecklistACTIVITYS table
+let checklistCompletionCounts = {}; // email -> how many checklist activities are finished
 
 const AUTH_STORAGE_KEY = 'ausf_auth';
 
@@ -96,6 +100,14 @@ async function setupAuthUI(user) {
     } else if (rankEl) {
         rankEl.style.display = 'none';
     }
+
+    // Show owner-only UI elements and load global stats for owners
+    if (isOwner) {
+        document.querySelectorAll('.owner-only').forEach(el => {
+            el.style.display = '';
+        });
+        loadAllVolunteersForOwner();
+    }
 }
 
 // Initialize
@@ -112,7 +124,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     setDefaultDate();
 });
 
-// Load data from Supabase (activities) and localStorage (payments and joined IDs)
+// Load data from Supabase (activities, checklist) and localStorage (payments and joined IDs)
 async function loadData() {
     // Load payments from localStorage (still using local storage for payments)
     const savedPayments = localStorage.getItem('ausf_payments');
@@ -124,9 +136,17 @@ async function loadData() {
 
     // Load activities from Supabase
     await loadActivitiesFromSupabase();
+
+    // Load checklist activities from Supabase
+    await loadChecklistFromSupabase();
     
     // Re-render with Supabase data
     renderAll();
+
+    // Update owner stats with latest checklist completion counts
+    if (isOwner) {
+        renderVolunteerStats();
+    }
 }
 
 // Load hosted activities from Supabase
@@ -166,6 +186,8 @@ async function loadActivitiesFromSupabase() {
                 organiser: row.Organizatori || '',
                 location: row.Locatie || '',
                 timeInterval: row["Ora Organizarii"] || '', // Time interval when activity is hosted
+                specialChecklistName: row[ACTIVITY_SPECIAL_CHECKLIST_NAME_COLUMN] || '',
+                isChecklistSpecial: !!row[ACTIVITY_SPECIAL_CHECKLIST_NAME_COLUMN],
                 supabase_id: row.id,
                 participantsText,
                 participantsCount: new Set(participantList).size
@@ -204,6 +226,166 @@ const SUPABASE_KEY = "sb_publishable_EFavNA6eM6-uC4FaHTsZNA_3ZlqOVYc";
 // IMPORTANT: table name must match exactly what exists in Supabase (case-sensitive)
 const SUPABASE_ACTIVITY_TABLE = "Activitati";
 const SUPABASE_VOLUNTEER_TABLE = "Voluntari";
+const SUPABASE_CHECKLIST_TABLE = "ChecklistACTIVITYS";
+// Column names for checklist table (must match Supabase exactly)
+const CHECKLIST_NAME_COLUMN = "CHECKLISTactivitate NAME";
+const CHECKLIST_FINISHED_COLUMN = "Finisshed list";
+const CHECKLIST_IN_PROGRESS_COLUMN = "In progress";
+const CHECKLIST_REQUIRED_2_COLUMN = "Required 2";
+// Extra column in Activitati to remember which checklist task this activity belongs to
+// You need to create this text column in Supabase table "Activitati".
+const ACTIVITY_SPECIAL_CHECKLIST_NAME_COLUMN = "SpecialChecklistName";
+
+// Load checklist activities from Supabase (ChecklistACTIVITYS)
+async function loadChecklistFromSupabase() {
+    try {
+        const res = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_CHECKLIST_TABLE}?select=*`, {
+            method: 'GET',
+            headers: {
+                'apikey': SUPABASE_KEY,
+                'Authorization': `Bearer ${SUPABASE_KEY}`,
+                'Content-Type': 'application/json',
+            },
+        });
+
+        if (!res.ok) {
+            const text = await res.text();
+            console.error('Supabase checklist fetch failed', res.status, text);
+            checklistActivities = [];
+            checklistCompletionCounts = {};
+            return;
+        }
+
+        const rows = await res.json();
+        const user = getCurrentUser();
+        const userEmail = (user && user.email) ? user.email.toLowerCase() : null;
+
+        checklistCompletionCounts = {};
+
+        checklistActivities = rows.map(row => {
+            const rawName = row[CHECKLIST_NAME_COLUMN] || '';
+            const finishedRaw = row[CHECKLIST_FINISHED_COLUMN] || '';
+            const inProgressRaw = row[CHECKLIST_IN_PROGRESS_COLUMN] || '';
+            const required2 = row[CHECKLIST_REQUIRED_2_COLUMN] === true;
+
+            const finishedList = finishedRaw
+                ? finishedRaw.split(',').map(x => x.trim()).filter(Boolean)
+                : [];
+            const inProgressList = inProgressRaw
+                ? inProgressRaw.split(',').map(x => x.trim()).filter(Boolean)
+                : [];
+            const finishedEmailsLower = finishedList.map(x => x.toLowerCase());
+            const inProgressEmailsLower = inProgressList.map(x => x.toLowerCase());
+
+            // Build global completion counts per email (only finished, not in-progress)
+            finishedEmailsLower.forEach(email => {
+                if (!email) return;
+                if (!checklistCompletionCounts[email]) {
+                    checklistCompletionCounts[email] = 0;
+                }
+                checklistCompletionCounts[email] += 1;
+            });
+
+            return {
+                id: row.id,
+                supabase_id: row.id,
+                name: rawName,
+                required2,
+                finishedRaw,
+                finishedList,
+                inProgressRaw,
+                inProgressList,
+                finishedCount: finishedList.length,
+                inProgressCount: inProgressList.length,
+                isCompletedByCurrentUser: userEmail ? finishedEmailsLower.includes(userEmail) : false,
+                isInProgressByCurrentUser: userEmail ? inProgressEmailsLower.includes(userEmail) : false,
+            };
+        });
+
+        // Refresh searchable combobox
+        setupChecklistSearchable();
+    } catch (err) {
+        console.error('Error loading checklist activities from Supabase', err);
+        checklistActivities = [];
+        checklistCompletionCounts = {};
+        setupChecklistSearchable();
+    }
+}
+
+// Searchable checklist combobox for linking activity to checklist task
+let checklistSearchableInitialized = false;
+function setupChecklistSearchable() {
+    const searchInput = document.getElementById('activity-checklist-search');
+    const valueInput = document.getElementById('activity-checklist-value');
+    const dropdown = document.getElementById('activity-checklist-dropdown');
+    const specialCheckbox = document.getElementById('activity-is-checklist-special');
+
+    if (!searchInput || !valueInput || !dropdown) return;
+
+    function renderDropdown(filter) {
+        const items = checklistActivities || [];
+        const term = (filter || '').toLowerCase().trim();
+        const filtered = term
+            ? items.filter(item => (item.name || '').toLowerCase().includes(term))
+            : items;
+
+        if (filtered.length === 0) {
+            dropdown.innerHTML = '<div class="checklist-dropdown-empty">No matching tasks</div>';
+            return;
+        }
+
+        dropdown.innerHTML = filtered.map(item => `
+            <div class="checklist-dropdown-item" data-value="${escapeHtml(item.name || '')}" data-id="${item.supabase_id || item.id}">
+                ${escapeHtml(item.name || '')}${item.required2 ? ' <span style="font-size:0.75rem;color:var(--gray);">(requires 2)</span>' : ''}
+            </div>
+        `).join('');
+
+        dropdown.querySelectorAll('.checklist-dropdown-item').forEach(el => {
+            el.addEventListener('click', () => {
+                const val = el.getAttribute('data-value');
+                searchInput.value = val;
+                valueInput.value = val;
+                dropdown.classList.remove('open');
+                searchInput.blur();
+            });
+        });
+    }
+
+    if (!checklistSearchableInitialized) {
+        checklistSearchableInitialized = true;
+        searchInput.addEventListener('focus', () => {
+            if (searchInput.disabled) return;
+            renderDropdown(searchInput.value);
+            dropdown.classList.add('open');
+        });
+
+        searchInput.addEventListener('input', () => {
+            renderDropdown(searchInput.value);
+            valueInput.value = searchInput.value;
+            dropdown.classList.add('open');
+        });
+
+        searchInput.addEventListener('blur', () => {
+            setTimeout(() => dropdown.classList.remove('open'), 150);
+        });
+
+        searchInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                dropdown.classList.remove('open');
+                searchInput.blur();
+            }
+        });
+    }
+
+    // Sync disabled state and clear when checkbox toggles (runs every time)
+    if (specialCheckbox) {
+        searchInput.disabled = !specialCheckbox.checked;
+        if (!specialCheckbox.checked) {
+            searchInput.value = '';
+            valueInput.value = '';
+        }
+    }
+}
 
 // Sync volunteer total hours to Supabase (table: Voluntari)
 async function syncVolunteerHoursToSupabase(totalHours) {
@@ -238,7 +420,7 @@ async function syncVolunteerHoursToSupabase(totalHours) {
         };
 
         if (rows.length > 0) {
-            // 2) Update existing row
+            // 2) Update existing row (do NOT overwrite existing Privilegii)
             const existing = rows[0];
             const id = existing.id;
 
@@ -257,7 +439,11 @@ async function syncVolunteerHoursToSupabase(totalHours) {
                 console.error('Failed to update Voluntari', updateRes.status, text);
             }
         } else {
-            // 3) Create new volunteer row
+            // 3) Create new volunteer row with default rank "Voluntar"
+            const insertPayload = {
+                ...payload,
+                Privilegii: 'Voluntar'
+            };
             const insertRes = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_VOLUNTEER_TABLE}?select=*`, {
                 method: 'POST',
                 headers: {
@@ -266,7 +452,7 @@ async function syncVolunteerHoursToSupabase(totalHours) {
                     'Content-Type': 'application/json',
                     'Prefer': 'return=representation'
                 },
-                body: JSON.stringify(payload)
+                body: JSON.stringify(insertPayload)
             });
 
             if (!insertRes.ok) {
@@ -291,7 +477,9 @@ async function syncActivityToSupabase(type, activity) {
             Locatie: activity.location || null,
             // Match Supabase column name exactly
             Organizatori: activity.organiser || null,
-            "Ora Organizarii": activity.timeInterval || null
+            "Ora Organizarii": activity.timeInterval || null,
+            // Optional link to checklist task (create this column in Supabase)
+            [ACTIVITY_SPECIAL_CHECKLIST_NAME_COLUMN]: activity.specialChecklistName || null
         };
 
         console.log('Sending activity to Supabase:', payload);
@@ -463,8 +651,45 @@ function setupForms() {
         if (e.target.id === 'join-activity-modal') closeJoinModal();
     });
 
+    // Participants modal
+    const closeParticipantsBtn = document.getElementById('close-participants-modal');
+    if (closeParticipantsBtn) {
+        closeParticipantsBtn.addEventListener('click', closeParticipantsModal);
+    }
+    const participantsModal = document.getElementById('participants-modal');
+    if (participantsModal) {
+        participantsModal.addEventListener('click', (e) => {
+            if (e.target.id === 'participants-modal') closeParticipantsModal();
+        });
+    }
+
     // Confirm join button
     document.getElementById('confirm-join-btn').addEventListener('click', confirmJoinActivity);
+
+    // Checklist owner form (add new checklist activity)
+    const checklistForm = document.getElementById('checklist-form');
+    if (checklistForm) {
+        checklistForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            addChecklistActivity();
+        });
+    }
+
+    // Controls for linking an activity to a checklist task (searchable combobox)
+    const activitySpecialCheckbox = document.getElementById('activity-is-checklist-special');
+    const activityChecklistSearch = document.getElementById('activity-checklist-search');
+    if (activitySpecialCheckbox && activityChecklistSearch) {
+        activityChecklistSearch.disabled = !activitySpecialCheckbox.checked;
+        activitySpecialCheckbox.addEventListener('change', () => {
+            const checked = activitySpecialCheckbox.checked;
+            activityChecklistSearch.disabled = !checked;
+            if (!checked) {
+                activityChecklistSearch.value = '';
+                const valueInput = document.getElementById('activity-checklist-value');
+                if (valueInput) valueInput.value = '';
+            }
+        });
+    }
 }
 
 // Open activity modal
@@ -477,6 +702,18 @@ function openActivityModal(type) {
     title.textContent = type === 'current' ? 'Add Current Activity' : 'Join Activity';
     form.reset();
     setDefaultDate();
+
+    // Reset checklist link controls
+    const activitySpecialCheckbox = document.getElementById('activity-is-checklist-special');
+    const activityChecklistSearch = document.getElementById('activity-checklist-search');
+    const activityChecklistValue = document.getElementById('activity-checklist-value');
+    if (activitySpecialCheckbox && activityChecklistSearch) {
+        activitySpecialCheckbox.checked = false;
+        activityChecklistSearch.disabled = true;
+        activityChecklistSearch.value = '';
+        if (activityChecklistValue) activityChecklistValue.value = '';
+    }
+
     modal.classList.add('active');
 }
 
@@ -564,6 +801,9 @@ async function confirmJoinActivity() {
         // Add current user to the activity's participants pool in Supabase
         await addParticipantToActivitySupabase(selectedActivityForJoin);
 
+        // If this activity is linked to a checklist task, mark that task as done for this user
+        await markChecklistDoneForActivity(selectedActivityForJoin);
+
         // Reload activities so participant counts and myActivities stay in sync
         await loadActivitiesFromSupabase();
         renderAll();
@@ -578,6 +818,46 @@ async function confirmJoinActivity() {
 function closeJoinModal() {
     document.getElementById('join-activity-modal').classList.remove('active');
     selectedActivityForJoin = null;
+}
+
+// Participants modal helpers
+function openParticipantsModal(participantsText) {
+    const modal = document.getElementById('participants-modal');
+    const listEl = document.getElementById('participants-list');
+    if (!modal || !listEl) return;
+
+    const names = (participantsText || '')
+        .split(',')
+        .map(name => name.trim())
+        .filter(Boolean);
+
+    if (names.length === 0) {
+        listEl.innerHTML = '<div class="empty-state"><p>No participants registered yet for this activity.</p></div>';
+    } else {
+        listEl.innerHTML = names.map(name => `
+            <div class="hours-item">
+                <span class="hours-item-name">${escapeHtml(name)}</span>
+            </div>
+        `).join('');
+    }
+
+    modal.classList.add('active');
+}
+
+function closeParticipantsModal() {
+    const modal = document.getElementById('participants-modal');
+    if (modal) {
+        modal.classList.remove('active');
+    }
+}
+
+function showParticipants(activityId) {
+    const activity =
+        currentActivities.find(a => a.supabase_id === activityId || a.id === activityId) ||
+        myActivities.find(a => a.supabase_id === activityId || a.my_activity_id === activityId || a.id === activityId);
+
+    if (!activity) return;
+    openParticipantsModal(activity.participantsText || '');
 }
 
 // Set default date to today
@@ -607,6 +887,14 @@ async function addActivity(type) {
     const location = document.getElementById('activity-location').value;
     const timeInterval = document.getElementById('activity-time-interval').value;
 
+    const specialCheckbox = document.getElementById('activity-is-checklist-special');
+    const checklistValueInput = document.getElementById('activity-checklist-value');
+    const isChecklistSpecial = specialCheckbox ? !!specialCheckbox.checked : false;
+    const selectedChecklistName =
+        isChecklistSpecial && checklistValueInput && checklistValueInput.value
+            ? checklistValueInput.value.trim()
+            : '';
+
     const activity = {
         name,
         description,
@@ -614,7 +902,9 @@ async function addActivity(type) {
         hours,
         organiser: organiser || '',
         location: location || '',
-        timeInterval: timeInterval || ''
+        timeInterval: timeInterval || '',
+        isChecklistSpecial,
+        specialChecklistName: selectedChecklistName || null
     };
 
     showLoading('Adding activity...');
@@ -631,6 +921,130 @@ async function addActivity(type) {
         }
     } finally {
         hideLoading();
+    }
+}
+
+// Add a new checklist activity (owner only) to ChecklistACTIVITYS table
+async function addChecklistActivity() {
+    if (!isOwner) {
+        console.warn('Only owners can add checklist activities');
+        return;
+    }
+
+    const nameInput = document.getElementById('checklist-name');
+    if (!nameInput || !nameInput.value.trim()) return;
+
+    const name = nameInput.value.trim();
+
+    const payload = {};
+    payload[CHECKLIST_NAME_COLUMN] = name;
+    payload[CHECKLIST_FINISHED_COLUMN] = '';
+    payload[CHECKLIST_IN_PROGRESS_COLUMN] = '';
+    payload[CHECKLIST_REQUIRED_2_COLUMN] = false;
+
+    showLoading('Adding checklist activity...');
+    try {
+        const res = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_CHECKLIST_TABLE}?select=*`, {
+            method: 'POST',
+            headers: {
+                'apikey': SUPABASE_KEY,
+                'Authorization': `Bearer ${SUPABASE_KEY}`,
+                'Content-Type': 'application/json',
+                'Prefer': 'return=representation'
+            },
+            body: JSON.stringify(payload)
+        });
+
+        if (!res.ok) {
+            const text = await res.text();
+            console.error('Supabase checklist insert failed', res.status, text);
+            alert('Failed to add checklist activity. Please check Supabase column names and try again.');
+            return;
+        }
+
+        await loadChecklistFromSupabase();
+        renderChecklist();
+
+        // Reset form fields
+        nameInput.value = '';
+    } finally {
+        hideLoading();
+    }
+}
+
+// When a user joins a special activity, mark the linked checklist task as done for them
+async function markChecklistDoneForActivity(activity) {
+    const user = getCurrentUser();
+    if (!user || !user.email || !activity || !activity.specialChecklistName) return;
+
+    const email = user.email.trim();
+    if (!email) return;
+
+    const item = checklistActivities.find(
+        a => (a.name || '').toLowerCase() === activity.specialChecklistName.toLowerCase()
+    );
+    if (!item) return;
+
+    const finishedList = (item.finishedRaw || '')
+        ? item.finishedRaw.split(',').map(x => x.trim()).filter(Boolean)
+        : [];
+    const inProgressList = (item.inProgressRaw || '')
+        ? item.inProgressRaw.split(',').map(x => x.trim()).filter(Boolean)
+        : [];
+
+    const emailLower = email.toLowerCase();
+    const alreadyFinished = finishedList.some(x => x.toLowerCase() === emailLower);
+    if (alreadyFinished) return;
+
+    const inProgressIndex = inProgressList.findIndex(x => x.toLowerCase() === emailLower);
+
+    let newFinished = [...finishedList];
+    let newInProgress = [...inProgressList];
+
+    if (item.required2) {
+        // Requires 2 participations: first goes to In progress, second moves to Finisshed list
+        if (inProgressIndex >= 0) {
+            // Already in progress -> move to finished
+            newInProgress.splice(inProgressIndex, 1);
+            newFinished.push(email);
+        } else {
+            // First participation -> add to in progress
+            newInProgress.push(email);
+        }
+    } else {
+        // Single participation -> add directly to finished
+        newFinished.push(email);
+    }
+
+    const payload = {};
+    payload[CHECKLIST_FINISHED_COLUMN] = newFinished.join(', ');
+    payload[CHECKLIST_IN_PROGRESS_COLUMN] = newInProgress.join(', ');
+
+    try {
+        const res = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_CHECKLIST_TABLE}?id=eq.${item.supabase_id}`, {
+            method: 'PATCH',
+            headers: {
+                'apikey': SUPABASE_KEY,
+                'Authorization': `Bearer ${SUPABASE_KEY}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(payload)
+        });
+
+        if (!res.ok) {
+            const text = await res.text();
+            console.error('Supabase checklist update failed', res.status, text);
+            return;
+        }
+
+        await loadChecklistFromSupabase();
+        renderChecklist();
+
+        if (isOwner) {
+            renderVolunteerStats();
+        }
+    } catch (err) {
+        console.error('Error updating checklist when joining activity', err);
     }
 }
 
@@ -739,6 +1153,7 @@ function renderAll() {
     renderMyActivities();
     renderTotalHours();
     renderPayments();
+    renderChecklist();
 
     // Also make sure volunteer hours are synced when UI renders,
     // e.g., on initial load after activities are loaded.
@@ -756,15 +1171,16 @@ function renderCurrentActivities() {
     }
 
     container.innerHTML = currentActivities.map(activity => `
-        <div class="activity-card">
+        <div class="activity-card ${activity.isChecklistSpecial ? 'activity-card-special' : ''}">
             ${isOwner ? `<button class="delete-btn" onclick="deleteActivity('current', ${activity.supabase_id || activity.id})" title="Delete">×</button>` : ''}
             <h3>${escapeHtml(activity.name)}</h3>
+            ${activity.isChecklistSpecial && activity.specialChecklistName ? `<div class="activity-special-badge">Checklist: ${escapeHtml(activity.specialChecklistName)}</div>` : ''}
             ${activity.description ? `<p>${escapeHtml(activity.description)}</p>` : ''}
             ${activity.location ? `<div class="activity-location">📍 ${escapeHtml(activity.location)}</div>` : ''}
             ${activity.organiser ? `<div class="activity-organiser">👤 ${escapeHtml(activity.organiser)}</div>` : ''}
             <div class="activity-date">📅 ${formatDate(activity.date)}</div>
             ${activity.timeInterval ? `<div class="activity-time">🕐 ${escapeHtml(activity.timeInterval)}</div>` : ''}
-            <div class="activity-participants">
+            <div class="activity-participants clickable" onclick="showParticipants(${activity.supabase_id || activity.id})" title="View participants">
                 👥 ${activity.participantsCount || 0} participant${(activity.participantsCount || 0) === 1 ? '' : 's'}
             </div>
         </div>
@@ -781,16 +1197,17 @@ function renderMyActivities() {
     }
 
     container.innerHTML = myActivities.map(activity => `
-        <div class="activity-card">
+        <div class="activity-card ${activity.isChecklistSpecial ? 'activity-card-special' : ''}">
             <button class="delete-btn" onclick="deleteActivity('my', ${activity.my_activity_id || activity.id})" title="Leave activity">×</button>
             <h3>${escapeHtml(activity.name)}</h3>
+            ${activity.isChecklistSpecial && activity.specialChecklistName ? `<div class="activity-special-badge">Checklist: ${escapeHtml(activity.specialChecklistName)}</div>` : ''}
             ${activity.description ? `<p>${escapeHtml(activity.description)}</p>` : ''}
             ${activity.location ? `<div class="activity-location">📍 ${escapeHtml(activity.location)}</div>` : ''}
             ${activity.organiser ? `<div class="activity-organiser">👤 ${escapeHtml(activity.organiser)}</div>` : ''}
             <div class="activity-date">📅 ${formatDate(activity.date)}</div>
             ${activity.timeInterval ? `<div class="activity-time">🕐 ${escapeHtml(activity.timeInterval)}</div>` : ''}
             <div class="activity-hours">${activity.hours || 0} hours</div>
-            <div class="activity-participants">
+            <div class="activity-participants clickable" onclick="showParticipants(${activity.supabase_id || activity.my_activity_id || activity.id})" title="View participants">
                 👥 ${activity.participantsCount || 0} participant${(activity.participantsCount || 0) === 1 ? '' : 's'}
             </div>
         </div>
@@ -801,6 +1218,18 @@ function renderMyActivities() {
 function renderTotalHours() {
     const totalHours = calculateTotalHours();
     document.getElementById('total-hours-display').textContent = totalHours.toFixed(1);
+
+    // Update progress bar out of 120 hours
+    const PROGRESS_GOAL = 120;
+    const percent = Math.max(0, Math.min(100, (totalHours / PROGRESS_GOAL) * 100));
+    const fill = document.getElementById('hours-progress-fill');
+    const label = document.getElementById('hours-progress-label');
+    if (fill) {
+        fill.style.width = `${percent}%`;
+    }
+    if (label) {
+        label.textContent = `${totalHours.toFixed(1)} / ${PROGRESS_GOAL} hours (${percent.toFixed(1)}%)`;
+    }
 
     const breakdown = document.getElementById('hours-breakdown');
     
@@ -846,6 +1275,277 @@ function renderPayments() {
     `).join('');
 }
 
+// Render checklist activities
+function renderChecklist() {
+    const container = document.getElementById('checklist-list');
+    if (!container) return;
+
+    if (!checklistActivities || checklistActivities.length === 0) {
+        container.innerHTML = '<div class="empty-state"><p>No checklist activities defined yet.</p></div>';
+        return;
+    }
+
+    container.innerHTML = checklistActivities.map(item => {
+        const classes = [
+            'checklist-item',
+            item.isCompletedByCurrentUser ? 'checklist-item-completed' : '',
+            item.isInProgressByCurrentUser && item.required2 ? 'checklist-item-in-progress' : ''
+        ].filter(Boolean).join(' ');
+
+        let checkIcon = '⬜';
+        if (item.isCompletedByCurrentUser) {
+            checkIcon = '✅';
+        } else if (item.isInProgressByCurrentUser && item.required2) {
+            checkIcon = '🔄'; // In progress (1/2)
+        }
+
+        const metaText = item.required2
+            ? `${item.finishedCount || 0} finished · ${item.inProgressCount || 0} in progress`
+            : `${item.finishedCount || 0} finished`;
+
+        return `
+            <div class="${classes}">
+                <div class="checklist-main">
+                    <span class="checklist-check">${checkIcon}</span>
+                    <span class="checklist-name">${escapeHtml(item.name || '')}</span>
+                    ${item.required2 ? '<span class="checklist-badge">2×</span>' : ''}
+                </div>
+                <div class="checklist-meta">
+                    ${metaText}
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+// Owner-only: load all volunteers from Supabase (for stats tab)
+async function loadAllVolunteersForOwner() {
+    if (!isOwner) return;
+    try {
+        const res = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_VOLUNTEER_TABLE}?select=id,NumeComplet,Email,OreVoluntariat,Privilegii`, {
+            method: 'GET',
+            headers: {
+                'apikey': SUPABASE_KEY,
+                'Authorization': `Bearer ${SUPABASE_KEY}`,
+                'Content-Type': 'application/json',
+            },
+        });
+
+        if (!res.ok) {
+            const text = await res.text();
+            console.error('Failed to load volunteers for stats', res.status, text);
+            return;
+        }
+
+        allVolunteers = await res.json();
+        initializeAvailableVolunteerRanks();
+        setupVolunteerRankFilterOptions();
+        setupVolunteerFilterListeners();
+        renderVolunteerStats();
+    } catch (err) {
+        console.error('Error loading volunteers for stats', err);
+    }
+}
+
+// Initialize available rank list from loaded volunteers
+function initializeAvailableVolunteerRanks() {
+    availableVolunteerRanks = Array.from(new Set(
+        ['Voluntar']
+            .concat((allVolunteers || []).map(v => (v.Privilegii || '').trim()).filter(Boolean))
+    ));
+}
+
+// Build rank filter options from loaded volunteers and custom ranks
+function setupVolunteerRankFilterOptions() {
+    const select = document.getElementById('volunteer-rank-filter');
+    if (!select || !allVolunteers) return;
+
+    const currentValue = select.value;
+    const ranks = Array.from(new Set(availableVolunteerRanks)).sort();
+
+    select.innerHTML = '<option value="">All ranks</option>' +
+        ranks.map(r => `<option value="${escapeHtml(r)}">${escapeHtml(r)}</option>`).join('');
+
+    // Try to preserve previous selection if still valid
+    if (currentValue && ranks.includes(currentValue)) {
+        select.value = currentValue;
+    }
+}
+
+// Attach listeners for search + rank filter once
+let volunteerFiltersInitialized = false;
+function setupVolunteerFilterListeners() {
+    if (volunteerFiltersInitialized) return;
+    const searchInput = document.getElementById('volunteer-search');
+    const rankSelect = document.getElementById('volunteer-rank-filter');
+    const addRankInput = document.getElementById('volunteer-rank-add-input');
+    const addRankBtn = document.getElementById('volunteer-rank-add-btn');
+    if (searchInput) {
+        searchInput.addEventListener('input', () => {
+            renderVolunteerStats();
+        });
+    }
+    if (rankSelect) {
+        rankSelect.addEventListener('change', () => {
+            renderVolunteerStats();
+        });
+    }
+    if (addRankBtn && addRankInput) {
+        const handler = () => {
+            addNewVolunteerRank(addRankInput.value);
+        };
+        addRankBtn.addEventListener('click', handler);
+        addRankInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                handler();
+            }
+        });
+    }
+    volunteerFiltersInitialized = true;
+}
+
+// Add a new rank value to the available list (owner only)
+function addNewVolunteerRank(rawValue) {
+    if (!isOwner) return;
+    const value = (rawValue || '').trim();
+    if (!value) return;
+    if (!availableVolunteerRanks.includes(value)) {
+        availableVolunteerRanks.push(value);
+    }
+    setupVolunteerRankFilterOptions();
+    renderVolunteerStats();
+    const input = document.getElementById('volunteer-rank-add-input');
+    if (input) input.value = '';
+}
+
+// Build HTML options for rank selects, marking current value as selected
+function buildRankOptionsHtml(currentValue) {
+    const normalizedCurrent = (currentValue || '').trim() || 'Voluntar';
+
+    const rankSet = new Set(availableVolunteerRanks || []);
+    rankSet.add('Voluntar');
+
+    const ranks = Array.from(rankSet).sort((a, b) => a.localeCompare(b));
+
+    // Keep "Voluntar" as the first option
+    const ordered = ['Voluntar'].concat(ranks.filter(r => r !== 'Voluntar'));
+
+    let html = '';
+    ordered.forEach(r => {
+        const selected = r === normalizedCurrent ? ' selected' : '';
+        const safe = escapeHtml(r);
+        html += `<option value="${safe}"${selected}>${safe}</option>`;
+    });
+    return html;
+}
+
+// Change a volunteer's rank from the stats tab (Owner only)
+async function changeVolunteerRank(volunteerId, newRank) {
+    if (!isOwner || !volunteerId) return;
+    showLoading('Updating rank...');
+    try {
+        const normalizedRank = (newRank || '').trim() || 'Voluntar';
+        const payload = {
+            Privilegii: normalizedRank
+        };
+        const res = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_VOLUNTEER_TABLE}?id=eq.${volunteerId}`, {
+            method: 'PATCH',
+            headers: {
+                'apikey': SUPABASE_KEY,
+                'Authorization': `Bearer ${SUPABASE_KEY}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(payload)
+        });
+
+        if (!res.ok) {
+            const text = await res.text();
+            console.error('Failed to update volunteer rank', res.status, text);
+            alert('Failed to update rank. Please try again.');
+            return;
+        }
+
+        // Update local cache
+        allVolunteers = allVolunteers.map(v =>
+            v.id === volunteerId ? { ...v, Privilegii: normalizedRank } : v
+        );
+
+        if (normalizedRank && !availableVolunteerRanks.includes(normalizedRank)) {
+            availableVolunteerRanks.push(normalizedRank);
+            setupVolunteerRankFilterOptions();
+        }
+
+        renderVolunteerStats();
+    } catch (err) {
+        console.error('Error updating volunteer rank', err);
+        alert('Error updating rank. Please try again.');
+    } finally {
+        hideLoading();
+    }
+}
+
+// Render owner-only volunteer stats tab
+function renderVolunteerStats() {
+    const container = document.getElementById('volunteer-stats-content');
+    if (!container) return;
+
+    if (!allVolunteers || allVolunteers.length === 0) {
+        container.innerHTML = '<div class="empty-state"><p>No volunteers found in Supabase yet.</p></div>';
+        return;
+    }
+
+    const searchInput = document.getElementById('volunteer-search');
+    const rankSelect = document.getElementById('volunteer-rank-filter');
+    const searchTerm = (searchInput?.value || '').toLowerCase().trim();
+    const selectedRank = (rankSelect?.value || '').trim();
+
+    const filtered = allVolunteers.filter(v => {
+        const name = (v.NumeComplet || '').toLowerCase();
+        const email = (v.Email || '').toLowerCase();
+        const rank = (v.Privilegii || '').trim();
+
+        const matchesSearch = !searchTerm ||
+            name.includes(searchTerm) ||
+            email.includes(searchTerm);
+
+        const matchesRank = !selectedRank || rank === selectedRank;
+
+        return matchesSearch && matchesRank;
+    });
+
+    if (filtered.length === 0) {
+        container.innerHTML = '<div class="empty-state"><p>No volunteers match your search/filter.</p></div>';
+        return;
+    }
+
+    container.innerHTML = filtered.map(v => {
+        const email = (v.Email || '').toLowerCase();
+        const checklistDone = email && checklistCompletionCounts[email] ? checklistCompletionCounts[email] : 0;
+        return `
+        <div class="payment-item">
+            <div class="payment-item-info">
+                <div class="payment-item-description">${escapeHtml(v.NumeComplet || v.Email || 'Unknown')}</div>
+                <div class="payment-item-date">${escapeHtml(v.Email || '')}</div>
+                <div style="margin-top: 4px; font-size: 0.8rem; color: var(--gray);">
+                    Checklist activities done: <strong>${checklistDone}</strong>
+                </div>
+                <div style="margin-top: 6px; display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 0.85rem; color: var(--gray);">Rank:</span>
+                    <select class="volunteer-rank-select" onchange="changeVolunteerRank(${v.id}, this.value)">
+                        ${buildRankOptionsHtml(v.Privilegii || '')}
+                    </select>
+                </div>
+            </div>
+            <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px;">
+                <span class="payment-item-amount">${(v.OreVoluntariat || 0).toFixed ? v.OreVoluntariat.toFixed(1) : Number(v.OreVoluntariat || 0).toFixed(1)} h</span>
+                <span style="font-size: 0.8rem; color: var(--gray);">Last payment: N/A</span>
+            </div>
+        </div>
+    `;
+    }).join('');
+}
+
 // Utility functions
 function formatDate(dateString) {
     const date = new Date(dateString);
@@ -862,4 +1562,6 @@ function escapeHtml(text) {
 window.deleteActivity = deleteActivity;
 window.deletePayment = deletePayment;
 window.selectActivityForJoin = selectActivityForJoin;
+window.showParticipants = showParticipants;
+window.changeVolunteerRank = changeVolunteerRank;
 
