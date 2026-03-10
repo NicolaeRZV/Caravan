@@ -10,6 +10,9 @@ let allVolunteers = []; // Loaded only for Owner in stats tab
 let availableVolunteerRanks = []; // All known rank values for owner UI
 let checklistActivities = []; // Activities from ChecklistACTIVITYS table
 let checklistCompletionCounts = {}; // email -> how many checklist activities are finished
+let activeParticipantsActivity = null; // Activity currently shown in Participants modal (for force-add)
+let currentVolunteerHoursApproved = 0;
+let currentVolunteerHoursPending = 0;
 
 const AUTH_STORAGE_KEY = 'ausf_auth';
 
@@ -102,12 +105,10 @@ async function setupAuthUI(user) {
     }
 
     // Show owner-only UI elements and load global stats for owners
-    if (isOwner) {
-        document.querySelectorAll('.owner-only').forEach(el => {
-            el.style.display = '';
-        });
-        loadAllVolunteersForOwner();
-    }
+    document.querySelectorAll('.owner-only').forEach(el => {
+        el.style.display = isOwner ? '' : 'none';
+    });
+    if (isOwner) loadAllVolunteersForOwner();
 }
 
 // Initialize
@@ -147,6 +148,9 @@ async function loadData() {
     if (isOwner) {
         renderVolunteerStats();
     }
+
+    // Load current volunteer hours (approved + pending)
+    await loadCurrentVolunteerHoursFromSupabase();
 }
 
 // Load hosted activities from Supabase
@@ -204,13 +208,29 @@ async function loadActivitiesFromSupabase() {
 
 // Build myActivities from currentActivities based on joined IDs
 function buildMyActivities() {
-    // Filter activities that are in joinedActivityIds
-    // Use the activity's Ore (hours) from Supabase, not user input
+    const user = getCurrentUser();
+    const email = (user && user.email) ? user.email.trim().toLowerCase() : '';
+    const legacyName =
+        (user && user.user_metadata && (user.user_metadata.name || user.user_metadata.full_name))
+            ? String(user.user_metadata.name || user.user_metadata.full_name).trim().toLowerCase()
+            : '';
+    if (!email) {
+        myActivities = [];
+        return;
+    }
+
     myActivities = currentActivities
-        .filter(activity => joinedActivityIds.includes(activity.supabase_id))
+        .filter(activity => {
+            const list = (activity.participantsText || '')
+                .split(',')
+                .map(x => x.trim())
+                .filter(Boolean)
+                .map(x => x.toLowerCase());
+            return list.includes(email) || (legacyName ? list.includes(legacyName) : false);
+        })
         .map(activity => ({
             ...activity,
-            my_activity_id: activity.supabase_id // Use supabase_id as the identifier
+            my_activity_id: activity.supabase_id
         }));
 }
 
@@ -515,12 +535,10 @@ async function addParticipantToActivitySupabase(activity) {
     const user = getCurrentUser();
     if (!user || !activity || !activity.supabase_id) return;
 
-    const displayName =
-        (user.user_metadata && (user.user_metadata.name || user.user_metadata.full_name)) ||
-        user.email ||
-        null;
+    // Store participation as email so "My Activities" works across devices
+    const participantKey = (user.email || '').trim().toLowerCase() || null;
 
-    if (!displayName) return;
+    if (!participantKey) return;
 
     try {
         const existingText = activity.participantsText || '';
@@ -528,8 +546,9 @@ async function addParticipantToActivitySupabase(activity) {
             ? existingText.split(',').map(p => p.trim()).filter(Boolean)
             : [];
 
-        if (!list.includes(displayName)) {
-            list.push(displayName);
+        const lowerSet = new Set(list.map(x => x.toLowerCase()));
+        if (!lowerSet.has(participantKey)) {
+            list.push(participantKey);
         }
 
         const updatedText = list.join(', ');
@@ -558,12 +577,13 @@ async function removeParticipantFromActivitySupabase(activity) {
     const user = getCurrentUser();
     if (!user || !activity || !activity.supabase_id) return;
 
+    const emailKey = (user.email || '').trim().toLowerCase() || null;
     const displayName =
         (user.user_metadata && (user.user_metadata.name || user.user_metadata.full_name)) ||
         user.email ||
         null;
 
-    if (!displayName) return;
+    if (!emailKey && !displayName) return;
 
     try {
         const existingText = activity.participantsText || '';
@@ -571,7 +591,13 @@ async function removeParticipantFromActivitySupabase(activity) {
             ? existingText.split(',').map(p => p.trim()).filter(Boolean)
             : [];
 
-        const filtered = list.filter(name => name !== displayName);
+        // Remove both the email-keyed entry (new) and any legacy displayName entry (old)
+        const filtered = list.filter(name => {
+            const lower = (name || '').trim().toLowerCase();
+            if (emailKey && lower === emailKey) return false;
+            if (displayName && (name || '').trim() === displayName) return false;
+            return true;
+        });
         const updatedText = filtered.join(', ');
 
         const patchRes = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_ACTIVITY_TABLE}?id=eq.${activity.supabase_id}`, {
@@ -663,6 +689,30 @@ function setupForms() {
         });
     }
 
+    // Owner-only: force-add participant to currently open activity
+    const forceAddBtn = document.getElementById('participants-force-add-btn');
+    const forceAddInput = document.getElementById('participants-force-add-input');
+    if (forceAddBtn && forceAddInput) {
+        const handler = async () => {
+            if (!isOwner) return;
+            const raw = (forceAddInput.value || '').trim();
+            if (!raw) return;
+            if (!activeParticipantsActivity) {
+                alert('Open an activity participants list first.');
+                return;
+            }
+            await forceAddParticipantToActivitySupabase(activeParticipantsActivity, raw);
+            forceAddInput.value = '';
+        };
+        forceAddBtn.addEventListener('click', handler);
+        forceAddInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                handler();
+            }
+        });
+    }
+
     // Confirm join button
     document.getElementById('confirm-join-btn').addEventListener('click', confirmJoinActivity);
 
@@ -738,8 +788,9 @@ function openJoinActivityModal() {
     }
     
     listContainer.innerHTML = currentActivities.map(activity => `
-        <div class="activity-card" style="cursor: pointer; margin-bottom: 10px;" data-activity-id="${activity.supabase_id}" onclick="selectActivityForJoin(${activity.supabase_id}, this)">
+        <div class="activity-card ${activity.isChecklistSpecial ? 'activity-card-special' : ''}" style="cursor: pointer; margin-bottom: 10px;" data-activity-id="${activity.supabase_id}" onclick="selectActivityForJoin(${activity.supabase_id}, this)">
             <h3>${escapeHtml(activity.name)}</h3>
+            ${activity.isChecklistSpecial && activity.specialChecklistName ? `<div class="activity-special-badge">Checklist: ${escapeHtml(activity.specialChecklistName)}</div>` : ''}
             ${activity.description ? `<p>${escapeHtml(activity.description)}</p>` : ''}
             ${activity.location ? `<div class="activity-location">📍 ${escapeHtml(activity.location)}</div>` : ''}
             ${activity.organiser ? `<div class="activity-organiser">👤 ${escapeHtml(activity.organiser)}</div>` : ''}
@@ -783,8 +834,15 @@ async function confirmJoinActivity() {
         return;
     }
     
-    // Check if already joined
-    if (joinedActivityIds.includes(selectedActivityForJoin.supabase_id)) {
+    // Check if already joined (via Supabase participants)
+    const user = getCurrentUser();
+    const email = (user && user.email) ? user.email.trim().toLowerCase() : '';
+    const existingList = (selectedActivityForJoin.participantsText || '')
+        .split(',')
+        .map(x => x.trim())
+        .filter(Boolean)
+        .map(x => x.toLowerCase());
+    if (email && existingList.includes(email)) {
         alert('You have already joined this activity.');
         closeJoinModal();
         return;
@@ -792,20 +850,18 @@ async function confirmJoinActivity() {
     
     showLoading('Joining activity...');
     try {
-        // Add to joined list (hours come from the activity's Ore field in Supabase)
-        joinedActivityIds.push(selectedActivityForJoin.supabase_id);
-        
-        // Save joined IDs
-        saveData();
-
-        // Add current user to the activity's participants pool in Supabase
+        // Add current user to the activity's participants pool in Supabase (stores email)
         await addParticipantToActivitySupabase(selectedActivityForJoin);
+
+        // Add activity hours as pending (unapproved) hours for this volunteer
+        await addPendingHoursForCurrentVolunteer(selectedActivityForJoin.hours || 0);
 
         // If this activity is linked to a checklist task, mark that task as done for this user
         await markChecklistDoneForActivity(selectedActivityForJoin);
 
         // Reload activities so participant counts and myActivities stay in sync
         await loadActivitiesFromSupabase();
+        await loadCurrentVolunteerHoursFromSupabase();
         renderAll();
 
         closeJoinModal();
@@ -821,12 +877,14 @@ function closeJoinModal() {
 }
 
 // Participants modal helpers
-function openParticipantsModal(participantsText) {
+async function openParticipantsModal(activity) {
     const modal = document.getElementById('participants-modal');
     const listEl = document.getElementById('participants-list');
     if (!modal || !listEl) return;
 
-    const names = (participantsText || '')
+    activeParticipantsActivity = activity || null;
+
+    const names = ((activity && activity.participantsText) || '')
         .split(',')
         .map(name => name.trim())
         .filter(Boolean);
@@ -834,11 +892,19 @@ function openParticipantsModal(participantsText) {
     if (names.length === 0) {
         listEl.innerHTML = '<div class="empty-state"><p>No participants registered yet for this activity.</p></div>';
     } else {
-        listEl.innerHTML = names.map(name => `
-            <div class="hours-item">
-                <span class="hours-item-name">${escapeHtml(name)}</span>
-            </div>
-        `).join('');
+        listEl.innerHTML = '<div class="empty-state"><p>Loading participant ranks...</p></div>';
+        const infoMap = await fetchVolunteerInfoForParticipants(names);
+        listEl.innerHTML = names.map(raw => {
+            const key = (raw || '').trim().toLowerCase();
+            const info = infoMap[key] || null;
+            const rank = info && info.rank ? info.rank : '—';
+            return `
+                <div class="hours-item" style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+                    <span class="hours-item-name">${escapeHtml(info?.displayName || raw)}</span>
+                    <span class="activity-special-badge" style="margin:0; background: rgba(76, 175, 80, 0.12);">${escapeHtml(rank)}</span>
+                </div>
+            `;
+        }).join('');
     }
 
     modal.classList.add('active');
@@ -849,15 +915,16 @@ function closeParticipantsModal() {
     if (modal) {
         modal.classList.remove('active');
     }
+    activeParticipantsActivity = null;
 }
 
-function showParticipants(activityId) {
+async function showParticipants(activityId) {
     const activity =
         currentActivities.find(a => a.supabase_id === activityId || a.id === activityId) ||
         myActivities.find(a => a.supabase_id === activityId || a.my_activity_id === activityId || a.id === activityId);
 
     if (!activity) return;
-    openParticipantsModal(activity.participantsText || '');
+    await openParticipantsModal(activity);
 }
 
 // Set default date to today
@@ -1092,19 +1159,14 @@ async function deleteActivity(type, id) {
             // Remove from joined list (don't delete from Supabase, just unjoin)
             const activity = myActivities.find(a => a.id === id || a.my_activity_id === id);
             if (activity && activity.supabase_id) {
-                joinedActivityIds = joinedActivityIds.filter(joinedId => joinedId !== activity.supabase_id);
-                saveData();
                 // Also remove user from participants pool for this activity
                 await removeParticipantFromActivitySupabase(activity);
                 await loadActivitiesFromSupabase();
+                await loadCurrentVolunteerHoursFromSupabase();
             }
         }
 
         renderAll();
-
-        // Sync volunteer hours after unjoin/delete
-        const totalHours = calculateTotalHours();
-        syncVolunteerHoursToSupabase(totalHours);
     } finally {
         hideLoading();
     }
@@ -1139,7 +1201,8 @@ function deletePayment(id) {
 
 // Calculate total hours
 function calculateTotalHours() {
-    return myActivities.reduce((total, activity) => total + (activity.hours || 0), 0);
+    // For UI, "total" is approved + pending (Supabase-driven)
+    return (Number(currentVolunteerHoursApproved || 0) + Number(currentVolunteerHoursPending || 0));
 }
 
 // Calculate total paid
@@ -1154,11 +1217,6 @@ function renderAll() {
     renderTotalHours();
     renderPayments();
     renderChecklist();
-
-    // Also make sure volunteer hours are synced when UI renders,
-    // e.g., on initial load after activities are loaded.
-    const totalHours = calculateTotalHours();
-    syncVolunteerHoursToSupabase(totalHours);
 }
 
 // Render current activities
@@ -1216,8 +1274,14 @@ function renderMyActivities() {
 
 // Render total hours
 function renderTotalHours() {
-    const totalHours = calculateTotalHours();
-    document.getElementById('total-hours-display').textContent = totalHours.toFixed(1);
+    const approved = Number(currentVolunteerHoursApproved || 0);
+    const pending = Number(currentVolunteerHoursPending || 0);
+    const totalHours = approved + pending;
+
+    const totalEl = document.getElementById('total-hours-display');
+    if (totalEl) totalEl.textContent = totalHours.toFixed(1);
+    const pendingEl = document.getElementById('pending-hours-display');
+    if (pendingEl) pendingEl.textContent = pending.toFixed(1);
 
     // Update progress bar out of 120 hours
     const PROGRESS_GOAL = 120;
@@ -1299,9 +1363,11 @@ function renderChecklist() {
             checkIcon = '🔄'; // In progress (1/2)
         }
 
-        const metaText = item.required2
-            ? `${item.finishedCount || 0} finished · ${item.inProgressCount || 0} in progress`
-            : `${item.finishedCount || 0} finished`;
+        const metaText = isOwner
+            ? (item.required2
+                ? `${item.finishedCount || 0} finished · ${item.inProgressCount || 0} in progress`
+                : `${item.finishedCount || 0} finished`)
+            : (item.required2 ? `Requires 2 participations` : ``);
 
         return `
             <div class="${classes}">
@@ -1310,19 +1376,121 @@ function renderChecklist() {
                     <span class="checklist-name">${escapeHtml(item.name || '')}</span>
                     ${item.required2 ? '<span class="checklist-badge">2×</span>' : ''}
                 </div>
-                <div class="checklist-meta">
-                    ${metaText}
-                </div>
+                ${metaText ? `<div class="checklist-meta">${metaText}</div>` : ``}
             </div>
         `;
     }).join('');
+}
+
+// Fetch volunteer info (rank + canonical name) for participant identifiers (email or name).
+// Returns a map keyed by lowercase identifier.
+async function fetchVolunteerInfoForParticipants(participants) {
+    const list = (participants || []).map(x => (x || '').trim()).filter(Boolean);
+    const map = {};
+    list.forEach(x => {
+        map[x.toLowerCase()] = { displayName: x, rank: null };
+    });
+    if (list.length === 0) return map;
+
+    // Build an OR filter for exact match on Email or NumeComplet (case-sensitive in PostgREST)
+    const orParts = [];
+    list.forEach(val => {
+        const safe = val.replace(/,/g, ''); // avoid breaking or=()
+        orParts.push(`Email.eq.${encodeURIComponent(safe)}`);
+        orParts.push(`NumeComplet.eq.${encodeURIComponent(safe)}`);
+    });
+    const orFilter = `or=(${orParts.join(',')})`;
+
+    try {
+        const res = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_VOLUNTEER_TABLE}?select=Email,NumeComplet,Privilegii&${orFilter}`, {
+            method: 'GET',
+            headers: {
+                'apikey': SUPABASE_KEY,
+                'Authorization': `Bearer ${SUPABASE_KEY}`,
+                'Content-Type': 'application/json',
+            },
+        });
+        if (!res.ok) return map;
+        const rows = await res.json();
+        rows.forEach(v => {
+            const email = (v.Email || '').trim();
+            const name = (v.NumeComplet || '').trim();
+            const rank = (v.Privilegii || '').trim() || null;
+            const display = name || email || 'Unknown';
+
+            if (email) {
+                map[email.toLowerCase()] = { displayName: display, rank };
+            }
+            if (name) {
+                map[name.toLowerCase()] = { displayName: display, rank };
+            }
+        });
+        return map;
+    } catch (err) {
+        console.error('Error fetching volunteer info for participants', err);
+        return map;
+    }
+}
+
+// Owner-only: add an arbitrary participant identifier to an activity in Supabase.
+async function forceAddParticipantToActivitySupabase(activity, rawIdentifier) {
+    if (!isOwner || !activity || !activity.supabase_id) return;
+    const identifier = (rawIdentifier || '').trim();
+    if (!identifier) return;
+
+    showLoading('Adding participant...');
+    try {
+        const existingText = activity.participantsText || '';
+        const list = existingText
+            ? existingText.split(',').map(p => p.trim()).filter(Boolean)
+            : [];
+
+        const lowerSet = new Set(list.map(x => x.toLowerCase()));
+        if (!lowerSet.has(identifier.toLowerCase())) {
+            list.push(identifier);
+        }
+
+        const updatedText = list.join(', ');
+        const patchRes = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_ACTIVITY_TABLE}?id=eq.${activity.supabase_id}`, {
+            method: 'PATCH',
+            headers: {
+                'apikey': SUPABASE_KEY,
+                'Authorization': `Bearer ${SUPABASE_KEY}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ Participanti: updatedText })
+        });
+
+        if (!patchRes.ok) {
+            const text = await patchRes.text();
+            console.error('Failed to force add participant', patchRes.status, text);
+            alert('Failed to add participant. Please try again.');
+            return;
+        }
+
+        await loadActivitiesFromSupabase();
+        renderAll();
+
+        // Re-open participants modal with updated activity data
+        const updated =
+            currentActivities.find(a => a.supabase_id === activity.supabase_id) ||
+            myActivities.find(a => a.supabase_id === activity.supabase_id);
+        if (updated) {
+            await openParticipantsModal(updated);
+        }
+    } catch (err) {
+        console.error('Error force adding participant', err);
+        alert('Error adding participant. Please try again.');
+    } finally {
+        hideLoading();
+    }
 }
 
 // Owner-only: load all volunteers from Supabase (for stats tab)
 async function loadAllVolunteersForOwner() {
     if (!isOwner) return;
     try {
-        const res = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_VOLUNTEER_TABLE}?select=id,NumeComplet,Email,OreVoluntariat,Privilegii`, {
+        const res = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_VOLUNTEER_TABLE}?select=id,NumeComplet,Email,OreVoluntariat,OreNeaprobate,Privilegii`, {
             method: 'GET',
             headers: {
                 'apikey': SUPABASE_KEY,
@@ -1522,6 +1690,7 @@ function renderVolunteerStats() {
     container.innerHTML = filtered.map(v => {
         const email = (v.Email || '').toLowerCase();
         const checklistDone = email && checklistCompletionCounts[email] ? checklistCompletionCounts[email] : 0;
+        const pending = Number(v.OreNeaprobate || 0);
         return `
         <div class="payment-item">
             <div class="payment-item-info">
@@ -1529,6 +1698,10 @@ function renderVolunteerStats() {
                 <div class="payment-item-date">${escapeHtml(v.Email || '')}</div>
                 <div style="margin-top: 4px; font-size: 0.8rem; color: var(--gray);">
                     Checklist activities done: <strong>${checklistDone}</strong>
+                </div>
+                <div style="margin-top: 4px; font-size: 0.8rem; color: var(--gray);">
+                    Pending hours: <strong>${pending.toFixed(1)}</strong>
+                    ${pending > 0 ? `<button class="volunteer-rank-add-btn" style="margin-left: 10px; padding: 6px 10px;" onclick="approveVolunteerPendingHours(${v.id})">Approve</button>` : ``}
                 </div>
                 <div style="margin-top: 6px; display: flex; align-items: center; gap: 8px;">
                     <span style="font-size: 0.85rem; color: var(--gray);">Rank:</span>
@@ -1544,6 +1717,169 @@ function renderVolunteerStats() {
         </div>
     `;
     }).join('');
+}
+
+async function loadCurrentVolunteerHoursFromSupabase() {
+    const user = getCurrentUser();
+    const email = (user && user.email) ? user.email.trim() : '';
+    if (!email) return;
+    try {
+        const res = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_VOLUNTEER_TABLE}?Email=eq.${encodeURIComponent(email)}&select=id,OreVoluntariat,OreNeaprobate`, {
+            method: 'GET',
+            headers: {
+                'apikey': SUPABASE_KEY,
+                'Authorization': `Bearer ${SUPABASE_KEY}`,
+                'Content-Type': 'application/json',
+            },
+        });
+        if (!res.ok) return;
+        const rows = await res.json();
+        const row = rows && rows[0] ? rows[0] : null;
+        currentVolunteerHoursApproved = Number(row?.OreVoluntariat || 0);
+        currentVolunteerHoursPending = Number(row?.OreNeaprobate || 0);
+    } catch (err) {
+        console.error('Error loading current volunteer hours', err);
+    }
+}
+
+async function ensureVolunteerRowExistsForCurrentUser() {
+    const user = getCurrentUser();
+    const email = (user && user.email) ? user.email.trim() : '';
+    if (!email) return null;
+
+    const name = (user.user_metadata && (user.user_metadata.name || user.user_metadata.full_name)) || email;
+
+    try {
+        const checkRes = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_VOLUNTEER_TABLE}?Email=eq.${encodeURIComponent(email)}&select=id`, {
+            method: 'GET',
+            headers: {
+                'apikey': SUPABASE_KEY,
+                'Authorization': `Bearer ${SUPABASE_KEY}`,
+                'Content-Type': 'application/json',
+            },
+        });
+        if (!checkRes.ok) return null;
+        const rows = await checkRes.json();
+        if (rows.length > 0) return rows[0];
+
+        const insertPayload = {
+            NumeComplet: name,
+            Email: email,
+            OreVoluntariat: 0,
+            OreNeaprobate: 0,
+            Privilegii: 'Voluntar'
+        };
+        const insertRes = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_VOLUNTEER_TABLE}?select=*`, {
+            method: 'POST',
+            headers: {
+                'apikey': SUPABASE_KEY,
+                'Authorization': `Bearer ${SUPABASE_KEY}`,
+                'Content-Type': 'application/json',
+                'Prefer': 'return=representation'
+            },
+            body: JSON.stringify(insertPayload)
+        });
+        if (!insertRes.ok) return null;
+        const inserted = await insertRes.json();
+        return inserted && inserted[0] ? inserted[0] : null;
+    } catch (err) {
+        console.error('Error ensuring volunteer row exists', err);
+        return null;
+    }
+}
+
+async function addPendingHoursForCurrentVolunteer(hoursToAdd) {
+    const hours = Number(hoursToAdd || 0);
+    if (!hours) return;
+
+    const user = getCurrentUser();
+    const email = (user && user.email) ? user.email.trim() : '';
+    if (!email) return;
+
+    await ensureVolunteerRowExistsForCurrentUser();
+
+    // Read current pending hours, then PATCH with new value (avoids requiring SQL RPC)
+    try {
+        const res = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_VOLUNTEER_TABLE}?Email=eq.${encodeURIComponent(email)}&select=id,OreNeaprobate`, {
+            method: 'GET',
+            headers: {
+                'apikey': SUPABASE_KEY,
+                'Authorization': `Bearer ${SUPABASE_KEY}`,
+                'Content-Type': 'application/json',
+            },
+        });
+        if (!res.ok) return;
+        const rows = await res.json();
+        const row = rows && rows[0] ? rows[0] : null;
+        if (!row?.id) return;
+        const currentPending = Number(row.OreNeaprobate || 0);
+        const nextPending = currentPending + hours;
+
+        const patchRes = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_VOLUNTEER_TABLE}?id=eq.${row.id}`, {
+            method: 'PATCH',
+            headers: {
+                'apikey': SUPABASE_KEY,
+                'Authorization': `Bearer ${SUPABASE_KEY}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ OreNeaprobate: nextPending })
+        });
+        if (!patchRes.ok) return;
+        currentVolunteerHoursPending = nextPending;
+    } catch (err) {
+        console.error('Error adding pending hours', err);
+    }
+}
+
+async function approveVolunteerPendingHours(volunteerId) {
+    if (!isOwner || !volunteerId) return;
+    showLoading('Approving hours...');
+    try {
+        const res = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_VOLUNTEER_TABLE}?id=eq.${volunteerId}&select=id,OreVoluntariat,OreNeaprobate`, {
+            method: 'GET',
+            headers: {
+                'apikey': SUPABASE_KEY,
+                'Authorization': `Bearer ${SUPABASE_KEY}`,
+                'Content-Type': 'application/json',
+            },
+        });
+        if (!res.ok) return;
+        const rows = await res.json();
+        const row = rows && rows[0] ? rows[0] : null;
+        if (!row) return;
+
+        const approved = Number(row.OreVoluntariat || 0);
+        const pending = Number(row.OreNeaprobate || 0);
+        if (pending <= 0) return;
+
+        const patchRes = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_VOLUNTEER_TABLE}?id=eq.${volunteerId}`, {
+            method: 'PATCH',
+            headers: {
+                'apikey': SUPABASE_KEY,
+                'Authorization': `Bearer ${SUPABASE_KEY}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                OreVoluntariat: approved + pending,
+                OreNeaprobate: 0
+            })
+        });
+        if (!patchRes.ok) {
+            const text = await patchRes.text();
+            console.error('Failed to approve hours', patchRes.status, text);
+            alert('Failed to approve hours. Please try again.');
+            return;
+        }
+
+        await loadAllVolunteersForOwner();
+        await loadCurrentVolunteerHoursFromSupabase();
+        renderAll();
+    } catch (err) {
+        console.error('Error approving pending hours', err);
+        alert('Error approving hours. Please try again.');
+    } finally {
+        hideLoading();
+    }
 }
 
 // Utility functions
@@ -1564,4 +1900,5 @@ window.deletePayment = deletePayment;
 window.selectActivityForJoin = selectActivityForJoin;
 window.showParticipants = showParticipants;
 window.changeVolunteerRank = changeVolunteerRank;
+window.approveVolunteerPendingHours = approveVolunteerPendingHours;
 
