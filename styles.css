@@ -479,6 +479,16 @@ h3 {
     overflow: hidden;
 }
 
+/* Pending/unapproved hours card (ensure readable on light background) */
+.hours-card--pending {
+    background: linear-gradient(135deg, rgba(255, 193, 7, 0.35) 0%, rgba(255, 193, 7, 0.18) 100%);
+    color: var(--dark-gray);
+    box-shadow: 0 8px 24px rgba(255, 193, 7, 0.22);
+}
+.hours-card--pending::before {
+    background: radial-gradient(circle, rgba(0, 0, 0, 0.06) 0%, transparent 70%);
+}
+
 .hours-card::before {
     content: '';
     position: absolute;
