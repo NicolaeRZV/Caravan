@@ -45,6 +45,7 @@
                         <span>Add New Activity</span>
                     </button>
                 </div>
+                <div id="quick-volunteer-hours"></div>
             </div>
         </div>
 
@@ -114,30 +115,9 @@
                     <h2>Total Hours Participated</h2>
                     <p class="section-subtitle">View your total participation hours</p>
                 </div>
-                <div class="stats-box">
-                    <div class="hours-card">
-                        <div class="card-icon">⏱️</div>
-                        <div class="hours-number" id="total-hours-display">0</div>
-                        <div class="hours-label">Total Hours</div>
-                    </div>
-                    <div class="hours-card hours-card--pending">
-                        <div class="card-icon">⏳</div>
-                        <div class="hours-number" id="pending-hours-display">0</div>
-                        <div class="hours-label">Pending Approval</div>
-                    </div>
+                
                 </div>
-                <div class="progress-box">
-                    <div class="box-header">
-                        <h3>Progress to 120 Hours</h3>
-                        <p class="box-subtitle">Track how close you are to the 120-hour goal</p>
-                    </div>
-                    <div class="progress-bar-wrapper">
-                        <div class="progress-bar-track">
-                            <div class="progress-bar-fill" id="hours-progress-fill"></div>
-                        </div>
-                        <div class="progress-bar-label" id="hours-progress-label">0 / 120 hours (0%)</div>
-                    </div>
-                </div>
+                <div id="hours-circles"></div>
                 <div class="breakdown-box">
                     <div class="box-header">
                         <h3>Hours Breakdown</h3>
@@ -280,7 +260,24 @@
                 </div>
                 <div class="form-group">
                     <label for="activity-organiser">Organiser</label>
-                    <input type="text" id="activity-organiser" placeholder="e.g., John Doe">
+                    <div class="checklist-combobox">
+                        <input type="text" id="activity-organiser" placeholder="Search by name or email..." autocomplete="off">
+                        <input type="hidden" id="activity-organiser-email" value="">
+                        <div class="checklist-dropdown" id="activity-organiser-dropdown" role="listbox"></div>
+                    </div>
+                    <p class="box-subtitle" style="margin-top: 6px;">Organiser will be auto-added as a participant.</p>
+                </div>
+                <div class="form-group">
+                    <label for="activity-participants-search">
+                        <span class="label-icon">👥</span>
+                        Add participants (from Voluntari pool)
+                    </label>
+                    <div class="checklist-combobox">
+                        <input type="text" id="activity-participants-search" placeholder="Search volunteers..." autocomplete="off">
+                        <input type="hidden" id="activity-participants-emails" value="">
+                        <div class="checklist-dropdown" id="activity-participants-dropdown" role="listbox"></div>
+                    </div>
+                    <div id="activity-participants-selected" style="margin-top: 10px;"></div>
                 </div>
                 <div class="form-group">
                     <label for="activity-date">Date</label>
@@ -326,6 +323,18 @@
             <h2>Join Activity</h2>
             <div id="join-activity-list" style="max-height: 400px; overflow-y: auto; margin-bottom: 20px;">
                 <!-- Activities will be populated here -->
+            </div>
+            <div class="form-group" style="margin-bottom: 14px;">
+                <label for="join-availability">
+                    <span class="label-icon">🕐</span>
+                    Disponibilitate
+                </label>
+                <select id="join-availability" class="volunteer-rank-select">
+                    <option value="">Select…</option>
+                    <option value="Dimineata">Dimineata</option>
+                    <option value="Seara">Seara</option>
+                </select>
+                <p class="box-subtitle" style="margin-top: 6px;">This will be saved in Voluntari → Disponibilitate.</p>
             </div>
             <p style="margin: 10px 0; color: #666; font-size: 14px;">Hours will be automatically taken from the activity's duration.</p>
             <button type="button" class="submit-btn" id="confirm-join-btn" style="display: none;">Join Selected Activity</button>

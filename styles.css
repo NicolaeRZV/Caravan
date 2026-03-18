@@ -813,6 +813,127 @@ h3 {
     padding: 24px;
 }
 
+/* Current Activities: ensure bottom widget doesn't overlap action button */
+#quick-volunteer-hours {
+    margin-top: 28px;
+}
+.action-box {
+    margin-bottom: 18px;
+}
+
+/* 3-ring circular progress widget */
+.hours-circles {
+    display: grid;
+    grid-template-columns: 260px 1fr;
+    gap: 22px;
+    align-items: center;
+    background: var(--light-gray);
+    border: 2px solid var(--light-green);
+    border-radius: 14px;
+    padding: 18px 18px;
+    margin-bottom: 18px;
+    overflow: hidden;
+}
+
+.hours-circles-visual {
+    display: grid;
+    place-items: center;
+}
+
+.hours-circles-svg {
+    width: 240px;
+    height: 240px;
+}
+
+.hours-circles-center {
+    position: absolute;
+    text-align: center;
+    width: 200px;
+}
+
+.hours-circles-center-value {
+    font-size: 2.2rem;
+    font-weight: 800;
+    color: var(--dark-gray);
+    line-height: 1.1;
+}
+
+.hours-circles-center-sub {
+    margin-top: 6px;
+    font-size: 0.9rem;
+    color: var(--gray);
+    font-weight: 600;
+}
+
+.hours-circles-legend {
+    display: grid;
+    gap: 10px;
+}
+
+.hours-circles-legend-item {
+    background: var(--white);
+    border: 2px solid rgba(46, 125, 50, 0.12);
+    border-radius: 12px;
+    padding: 14px 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.hours-circles-legend-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+
+.hours-circles-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 999px;
+    flex: 0 0 auto;
+}
+
+.hours-circles-legend-title {
+    font-weight: 700;
+    color: var(--dark-gray);
+    font-size: 0.95rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.hours-circles-legend-meta {
+    font-size: 0.85rem;
+    color: var(--gray);
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.hours-circles-ring-track {
+    stroke: rgba(0,0,0,0.08);
+    fill: none;
+}
+.hours-circles-ring {
+    fill: none;
+    stroke-linecap: round;
+    transition: stroke-dashoffset 0.35s ease;
+    transform: rotate(-90deg);
+    transform-origin: 50% 50%;
+}
+
+@media (max-width: 768px) {
+    .hours-circles {
+        grid-template-columns: 1fr;
+        justify-items: center;
+        text-align: left;
+    }
+    .hours-circles-legend {
+        width: 100%;
+    }
+}
+
 /* Checklist activities */
 .checklist-item {
     background: var(--white);

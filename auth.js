@@ -28,6 +28,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const helperText = document.getElementById("auth-helper-text");
   const nameGroup = document.getElementById("auth-name-group");
   const nameInput = document.getElementById("auth-name");
+  const phoneInput = document.getElementById("auth-phone");
 
   // If already logged in, go straight to main app
   const existing = localStorage.getItem(AUTH_STORAGE_KEY);
@@ -79,8 +80,14 @@ document.addEventListener("DOMContentLoaded", () => {
     const password = document.getElementById("auth-password").value;
     const errorEl = document.getElementById("auth-error");
     const name = nameInput ? nameInput.value.trim() : "";
+    const phone = phoneInput ? phoneInput.value.trim() : "";
 
     errorEl.textContent = "";
+
+    if (!phone) {
+      errorEl.textContent = "Please enter your phone number.";
+      return;
+    }
 
     if (!email || !password) {
       errorEl.textContent = "Please enter email and password.";
@@ -90,14 +97,14 @@ document.addEventListener("DOMContentLoaded", () => {
     try {
       if (mode === "signin") {
         showLoading("Signing in...");
-        await signIn(email, password);
+        await signIn(email, password, { phone });
       } else {
         if (!name) {
           errorEl.textContent = "Please enter your name.";
           return;
         }
         showLoading("Creating account...");
-        await signUp(email, password, name);
+        await signUp(email, password, name, { phone });
       }
     } catch (err) {
       console.error("Auth error", err);
@@ -110,7 +117,7 @@ document.addEventListener("DOMContentLoaded", () => {
   updateModeUI();
 });
 
-async function signIn(email, password) {
+async function signIn(email, password, { phone } = {}) {
   const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
     method: "POST",
     headers: {
@@ -138,10 +145,16 @@ async function signIn(email, password) {
   };
   localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(userData));
 
+  try {
+    await upsertVolunteerPhone({ email, phone, name: data?.user?.user_metadata?.name || data?.user?.email || "" });
+  } catch (e) {
+    console.warn("Failed to save phone in Voluntari", e);
+  }
+
   window.location.href = "index.html";
 }
 
-async function signUp(email, password, name) {
+async function signUp(email, password, name, { phone } = {}) {
   const res = await fetch(`${SUPABASE_URL}/auth/v1/signup`, {
     method: "POST",
     headers: {
@@ -161,7 +174,73 @@ async function signUp(email, password, name) {
   }
 
   // After successful signup, directly sign in to create session
-  await signIn(email, password);
+  await signIn(email, password, { phone });
+}
+
+async function upsertVolunteerPhone({ email, phone, name }) {
+  const safeEmail = (email || "").trim();
+  const safePhone = (phone || "").trim();
+  if (!safeEmail || !safePhone) return;
+
+  // Check if volunteer exists
+  const checkRes = await fetch(
+    `${SUPABASE_URL}/rest/v1/Voluntari?Email=eq.${encodeURIComponent(safeEmail)}&select=id,Telefon`,
+    {
+      method: "GET",
+      headers: {
+        apikey: SUPABASE_KEY,
+        Authorization: `Bearer ${SUPABASE_KEY}`,
+        "Content-Type": "application/json",
+      },
+    }
+  );
+
+  if (!checkRes.ok) {
+    const text = await checkRes.text();
+    throw new Error(`Voluntari check failed: ${checkRes.status} ${text}`);
+  }
+
+  const rows = await checkRes.json();
+  if (rows && rows[0] && rows[0].id) {
+    const volunteerId = rows[0].id;
+    const patchRes = await fetch(`${SUPABASE_URL}/rest/v1/Voluntari?id=eq.${volunteerId}`, {
+      method: "PATCH",
+      headers: {
+        apikey: SUPABASE_KEY,
+        Authorization: `Bearer ${SUPABASE_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ Telefon: safePhone }),
+    });
+    if (!patchRes.ok) {
+      const text = await patchRes.text();
+      throw new Error(`Voluntari phone update failed: ${patchRes.status} ${text}`);
+    }
+    return;
+  }
+
+  // Insert new volunteer row if missing (best-effort)
+  const insertRes = await fetch(`${SUPABASE_URL}/rest/v1/Voluntari?select=*`, {
+    method: "POST",
+    headers: {
+      apikey: SUPABASE_KEY,
+      Authorization: `Bearer ${SUPABASE_KEY}`,
+      "Content-Type": "application/json",
+      Prefer: "return=representation",
+    },
+    body: JSON.stringify({
+      NumeComplet: (name || safeEmail).trim() || safeEmail,
+      Email: safeEmail,
+      Telefon: safePhone,
+      OreVoluntariat: 0,
+      OreNeaprobate: 0,
+      Privilegii: "Voluntar",
+    }),
+  });
+  if (!insertRes.ok) {
+    const text = await insertRes.text();
+    throw new Error(`Voluntari insert failed: ${insertRes.status} ${text}`);
+  }
 }
 
 

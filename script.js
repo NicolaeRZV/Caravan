@@ -13,7 +13,22 @@ let checklistCompletionCounts = {}; // email -> how many checklist activities ar
 let activeParticipantsActivity = null; // Activity currently shown in Participants modal (for force-add)
 let currentVolunteerHoursApproved = 0;
 let currentVolunteerHoursPending = 0;
+let currentVolunteerHoursApprovedV2 = 0; // Voluntariat Intern/Extern approved
+let currentVolunteerHoursPendingV2 = 0; // Voluntariat Intern/Extern pending
 let pendingParticipationsForOwner = []; // Owner-only: per-activity pending hours records
+
+// Activity modal: organiser + participants selected from Voluntari pool
+let activityOrganiserSelectedEmail = '';
+let activitySelectedParticipantEmails = []; // array of lowercased emails
+
+const DEPARTAMENT_OPTIONS = [
+    'STEAM',
+    'DIY',
+    'Activitati ciclism',
+    'Fun',
+    'Minte sanatoasa',
+    'Book Club'
+];
 
 const AUTH_STORAGE_KEY = 'ausf_auth';
 
@@ -410,6 +425,166 @@ function setupChecklistSearchable() {
     }
 }
 
+// Owner-only: searchable organiser + multi-participant picker for activity modal.
+let activityVolunteerPickersInitialized = false;
+function setupActivityVolunteerPickers() {
+    if (activityVolunteerPickersInitialized) return;
+    activityVolunteerPickersInitialized = true;
+
+    const organiserInput = document.getElementById('activity-organiser');
+    const organiserEmailInput = document.getElementById('activity-organiser-email');
+    const organiserDropdown = document.getElementById('activity-organiser-dropdown');
+
+    const participantSearch = document.getElementById('activity-participants-search');
+    const participantsEmailsInput = document.getElementById('activity-participants-emails');
+    const participantsDropdown = document.getElementById('activity-participants-dropdown');
+    const selectedBox = document.getElementById('activity-participants-selected');
+
+    if (!organiserInput || !organiserEmailInput || !organiserDropdown) return;
+    if (!participantSearch || !participantsEmailsInput || !participantsDropdown || !selectedBox) return;
+
+    function normalizeEmail(email) {
+        return (email || '').trim().toLowerCase();
+    }
+
+    function getVolunteerItems() {
+        // allVolunteers is loaded for owner stats; if not loaded yet, it will be fetched on demand
+        return (allVolunteers || [])
+            .map(v => ({
+                id: v.id,
+                email: normalizeEmail(v.Email),
+                name: (v.NumeComplet || '').trim(),
+                rank: (v.Privilegii || '').trim(),
+            }))
+            .filter(v => v.email || v.name);
+    }
+
+    function renderVolunteerDropdown(dropdownEl, filter, onPick) {
+        const items = getVolunteerItems();
+        const term = (filter || '').toLowerCase().trim();
+        const filtered = term
+            ? items.filter(v =>
+                (v.name || '').toLowerCase().includes(term) ||
+                (v.email || '').toLowerCase().includes(term)
+            )
+            : items.slice(0, 40);
+
+        const limited = filtered.slice(0, 40);
+        if (limited.length === 0) {
+            dropdownEl.innerHTML = '<div class="checklist-dropdown-empty">No matching volunteers</div>';
+            return;
+        }
+
+        dropdownEl.innerHTML = limited.map(v => `
+            <div class="checklist-dropdown-item" data-email="${escapeHtml(v.email)}" data-name="${escapeHtml(v.name)}">
+                <div style="font-weight:600;">${escapeHtml(v.name || v.email)}</div>
+                <div style="font-size:0.8rem;color:var(--gray);">${escapeHtml(v.email)}${v.rank ? ` · ${escapeHtml(v.rank)}` : ''}</div>
+            </div>
+        `).join('');
+
+        dropdownEl.querySelectorAll('.checklist-dropdown-item').forEach(el => {
+            el.addEventListener('click', () => {
+                const email = normalizeEmail(el.getAttribute('data-email'));
+                const name = (el.getAttribute('data-name') || '').trim();
+                onPick({ email, name });
+                dropdownEl.classList.remove('open');
+            });
+        });
+    }
+
+    function syncSelectedParticipantsUI() {
+        const unique = Array.from(new Set(activitySelectedParticipantEmails.map(normalizeEmail))).filter(Boolean);
+        activitySelectedParticipantEmails = unique;
+        participantsEmailsInput.value = unique.join(',');
+        if (unique.length === 0) {
+            selectedBox.innerHTML = '<div class="checklist-dropdown-empty">No participants added yet</div>';
+            return;
+        }
+        selectedBox.innerHTML = unique.map(email => `
+            <div class="hours-item" style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+                <span class="hours-item-name" style="min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(email)}</span>
+                <button type="button" class="volunteer-rank-add-btn" style="padding:6px 10px; background: rgba(244,67,54,0.12); border: 2px solid rgba(244,67,54,0.25);" data-remove="${escapeHtml(email)}">Remove</button>
+            </div>
+        `).join('');
+        selectedBox.querySelectorAll('button[data-remove]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const email = normalizeEmail(btn.getAttribute('data-remove'));
+                activitySelectedParticipantEmails = activitySelectedParticipantEmails.filter(x => normalizeEmail(x) !== email);
+                syncSelectedParticipantsUI();
+            });
+        });
+    }
+
+    organiserInput.addEventListener('focus', async () => {
+        if (!isOwner) return;
+        if (!allVolunteers || allVolunteers.length === 0) {
+            await loadAllVolunteersForOwner();
+        }
+        renderVolunteerDropdown(organiserDropdown, organiserInput.value, ({ email, name }) => {
+            activityOrganiserSelectedEmail = email;
+            organiserEmailInput.value = email;
+            organiserInput.value = name || email;
+        });
+        organiserDropdown.classList.add('open');
+    });
+
+    organiserInput.addEventListener('input', async () => {
+        if (!isOwner) return;
+        if (!allVolunteers || allVolunteers.length === 0) {
+            await loadAllVolunteersForOwner();
+        }
+        // If user manually types, clear selected email until they pick again
+        activityOrganiserSelectedEmail = '';
+        organiserEmailInput.value = '';
+        renderVolunteerDropdown(organiserDropdown, organiserInput.value, ({ email, name }) => {
+            activityOrganiserSelectedEmail = email;
+            organiserEmailInput.value = email;
+            organiserInput.value = name || email;
+        });
+        organiserDropdown.classList.add('open');
+    });
+
+    organiserInput.addEventListener('blur', () => {
+        setTimeout(() => organiserDropdown.classList.remove('open'), 150);
+    });
+
+    participantSearch.addEventListener('focus', async () => {
+        if (!isOwner) return;
+        if (!allVolunteers || allVolunteers.length === 0) {
+            await loadAllVolunteersForOwner();
+        }
+        renderVolunteerDropdown(participantsDropdown, participantSearch.value, ({ email }) => {
+            if (email) {
+                activitySelectedParticipantEmails.push(email);
+                syncSelectedParticipantsUI();
+            }
+            participantSearch.value = '';
+        });
+        participantsDropdown.classList.add('open');
+    });
+
+    participantSearch.addEventListener('input', async () => {
+        if (!isOwner) return;
+        if (!allVolunteers || allVolunteers.length === 0) {
+            await loadAllVolunteersForOwner();
+        }
+        renderVolunteerDropdown(participantsDropdown, participantSearch.value, ({ email }) => {
+            if (email) {
+                activitySelectedParticipantEmails.push(email);
+                syncSelectedParticipantsUI();
+            }
+            participantSearch.value = '';
+        });
+        participantsDropdown.classList.add('open');
+    });
+
+    participantSearch.addEventListener('blur', () => {
+        setTimeout(() => participantsDropdown.classList.remove('open'), 150);
+    });
+
+    syncSelectedParticipantsUI();
+}
+
 // Sync volunteer total hours to Supabase (table: Voluntari)
 async function syncVolunteerHoursToSupabase(totalHours) {
     const user = getCurrentUser();
@@ -501,6 +676,7 @@ async function syncActivityToSupabase(type, activity) {
             // Match Supabase column name exactly
             Organizatori: activity.organiser || null,
             "Ora Organizarii": activity.timeInterval || null,
+            Participanti: activity.participantsText || null,
             // Optional link to checklist task (create this column in Supabase)
             [ACTIVITY_SPECIAL_CHECKLIST_NAME_COLUMN]: activity.specialChecklistName || null
         };
@@ -743,6 +919,9 @@ function setupForms() {
             }
         });
     }
+
+    // Owner-only: activity modal organiser + participant picker (from Voluntari pool)
+    setupActivityVolunteerPickers();
 }
 
 // Open activity modal
@@ -755,6 +934,19 @@ function openActivityModal(type) {
     title.textContent = type === 'current' ? 'Add Current Activity' : 'Join Activity';
     form.reset();
     setDefaultDate();
+
+    activityOrganiserSelectedEmail = '';
+    activitySelectedParticipantEmails = [];
+    const organiserEmailInput = document.getElementById('activity-organiser-email');
+    if (organiserEmailInput) organiserEmailInput.value = '';
+    const organiserDropdown = document.getElementById('activity-organiser-dropdown');
+    if (organiserDropdown) organiserDropdown.innerHTML = '';
+    const participantsEmailsInput = document.getElementById('activity-participants-emails');
+    if (participantsEmailsInput) participantsEmailsInput.value = '';
+    const participantsDropdown = document.getElementById('activity-participants-dropdown');
+    if (participantsDropdown) participantsDropdown.innerHTML = '';
+    const selectedBox = document.getElementById('activity-participants-selected');
+    if (selectedBox) selectedBox.innerHTML = '';
 
     // Reset checklist link controls
     const activitySpecialCheckbox = document.getElementById('activity-is-checklist-special');
@@ -780,9 +972,11 @@ function openJoinActivityModal() {
     const modal = document.getElementById('join-activity-modal');
     const listContainer = document.getElementById('join-activity-list');
     const confirmBtn = document.getElementById('confirm-join-btn');
+    const availabilitySelect = document.getElementById('join-availability');
     
     selectedActivityForJoin = null;
     confirmBtn.style.display = 'none';
+    if (availabilitySelect) availabilitySelect.value = '';
     
     if (currentActivities.length === 0) {
         listContainer.innerHTML = '<div class="empty-state"><p>No activities available to join. Please add activities first.</p></div>';
@@ -836,6 +1030,12 @@ async function confirmJoinActivity() {
         alert('Please select an activity to join');
         return;
     }
+
+    const availability = (document.getElementById('join-availability')?.value || '').trim();
+    if (!availability) {
+        alert('Please select your Disponibilitate (Dimineata or Seara).');
+        return;
+    }
     
     // Check if already joined (via Supabase participants)
     const user = getCurrentUser();
@@ -853,6 +1053,8 @@ async function confirmJoinActivity() {
     
     showLoading('Joining activity...');
     try {
+        await upsertVolunteerFieldsForCurrentUser({ Disponibilitate: availability });
+
         // Add current user to the activity's participants pool in Supabase (stores email)
         await addParticipantToActivitySupabase(selectedActivityForJoin);
 
@@ -901,9 +1103,13 @@ async function openParticipantsModal(activity) {
             const key = (raw || '').trim().toLowerCase();
             const info = infoMap[key] || null;
             const rank = info && info.rank ? info.rank : '—';
+            const phone = info && info.phone ? info.phone : '—';
             return `
                 <div class="hours-item" style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
-                    <span class="hours-item-name">${escapeHtml(info?.displayName || raw)}</span>
+                    <span class="hours-item-name" style="min-width:0;">
+                        <div style="font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(info?.displayName || raw)}</div>
+                        <div style="font-size:0.8rem; color: var(--gray); margin-top:2px;">Telefon: ${escapeHtml(phone)}</div>
+                    </span>
                     <span class="activity-special-badge" style="margin:0; background: rgba(76, 175, 80, 0.12);">${escapeHtml(rank)}</span>
                 </div>
             `;
@@ -954,8 +1160,17 @@ async function addActivity(type) {
     const date = document.getElementById('activity-date').value;
     const hours = parseFloat(document.getElementById('activity-hours').value);
     const organiser = document.getElementById('activity-organiser').value;
+    const organiserEmail = (document.getElementById('activity-organiser-email')?.value || '').trim().toLowerCase();
     const location = document.getElementById('activity-location').value;
     const timeInterval = document.getElementById('activity-time-interval').value;
+
+    const rawParticipants = (document.getElementById('activity-participants-emails')?.value || '').trim();
+    const pickedParticipants = rawParticipants
+        ? rawParticipants.split(',').map(x => x.trim().toLowerCase()).filter(Boolean)
+        : [];
+    const initialParticipantSet = new Set(pickedParticipants);
+    if (organiserEmail) initialParticipantSet.add(organiserEmail);
+    const participantsText = Array.from(initialParticipantSet).join(', ');
 
     const specialCheckbox = document.getElementById('activity-is-checklist-special');
     const checklistValueInput = document.getElementById('activity-checklist-value');
@@ -974,7 +1189,8 @@ async function addActivity(type) {
         location: location || '',
         timeInterval: timeInterval || '',
         isChecklistSpecial,
-        specialChecklistName: selectedChecklistName || null
+        specialChecklistName: selectedChecklistName || null,
+        participantsText: participantsText || null
     };
 
     showLoading('Adding activity...');
@@ -1215,11 +1431,70 @@ function calculateTotalPaid() {
 
 // Render all sections
 function renderAll() {
+    renderQuickVolunteerHours();
     renderCurrentActivities();
     renderMyActivities();
     renderTotalHours();
     renderPayments();
     renderChecklist();
+}
+
+function renderQuickVolunteerHours() {
+    const host = document.getElementById('quick-volunteer-hours');
+    if (!host) return;
+
+    host.innerHTML = `
+        <div class="history-box" style="margin-bottom: 14px;">
+            <div class="box-header">
+                <h3 style="margin-bottom: 4px;">Voluntariat (Intern / Extern)</h3>
+                <p class="box-subtitle">Trimite ore pentru aprobare. Poti face asta de mai multe ori.</p>
+            </div>
+            <div class="history-content">
+                <div class="form-row">
+                    <div class="form-group" style="margin-bottom: 0;">
+                        <label for="quick-vol-type"><span class="label-icon">🏷️</span> Tip</label>
+                        <select id="quick-vol-type" class="volunteer-rank-select">
+                            <option value="Voluntariat Intern">Voluntariat Intern</option>
+                            <option value="Voluntariat Extern">Voluntariat Extern</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin-bottom: 0;">
+                        <label for="quick-vol-hours"><span class="label-icon">⏱️</span> Ore</label>
+                        <input id="quick-vol-hours" type="number" step="0.5" min="0" placeholder="e.g., 2" />
+                    </div>
+                </div>
+                <button type="button" class="submit-btn" id="quick-vol-submit" style="margin-top: 12px; max-width: 280px;">
+                    <span>Send for approval</span>
+                    <span class="btn-arrow">→</span>
+                </button>
+                <div id="quick-vol-hint" style="margin-top: 8px; font-size: 0.85rem; color: var(--gray);"></div>
+            </div>
+        </div>
+    `;
+
+    const btn = document.getElementById('quick-vol-submit');
+    if (!btn) return;
+    btn.addEventListener('click', async () => {
+        const type = (document.getElementById('quick-vol-type')?.value || '').trim();
+        const hours = Number(document.getElementById('quick-vol-hours')?.value || 0);
+        const hint = document.getElementById('quick-vol-hint');
+        if (!type) return;
+        if (!hours || hours <= 0) {
+            if (hint) hint.textContent = 'Please enter a valid hours amount.';
+            return;
+        }
+        if (hint) hint.textContent = '';
+        showLoading('Sending for approval...');
+        try {
+            await createCustomPendingParticipation(type, hours);
+            await loadCurrentVolunteerHoursFromSupabase();
+            if (isOwner) await loadPendingParticipationsForOwner();
+            renderAll();
+            if (hint) hint.textContent = 'Sent! Waiting for owner approval.';
+        } finally {
+            hideLoading();
+        }
+    });
 }
 
 // Render current activities
@@ -1280,23 +1555,21 @@ function renderTotalHours() {
     const approved = Number(currentVolunteerHoursApproved || 0);
     const pending = Number(currentVolunteerHoursPending || 0);
     const totalHours = approved;
+    const approvedV2 = Number(currentVolunteerHoursApprovedV2 || 0);
+    const pendingV2 = Number(currentVolunteerHoursPendingV2 || 0);
 
     const totalEl = document.getElementById('total-hours-display');
     if (totalEl) totalEl.textContent = totalHours.toFixed(1);
     const pendingEl = document.getElementById('pending-hours-display');
     if (pendingEl) pendingEl.textContent = pending.toFixed(1);
 
-    // Update progress bar out of 120 hours
-    const PROGRESS_GOAL = 120;
-    const percent = Math.max(0, Math.min(100, (totalHours / PROGRESS_GOAL) * 100));
-    const fill = document.getElementById('hours-progress-fill');
-    const label = document.getElementById('hours-progress-label');
-    if (fill) {
-        fill.style.width = `${percent}%`;
-    }
-    if (label) {
-        label.textContent = `${totalHours.toFixed(1)} / ${PROGRESS_GOAL} approved hours (${percent.toFixed(1)}%)`;
-    }
+    // (Progress bars removed; circle widget replaces them)
+
+    renderHoursCircles({
+        normalApproved: totalHours,
+        v2Approved: approvedV2,
+        pendingTotal: pending + pendingV2
+    });
 
     const breakdown = document.getElementById('hours-breakdown');
     
@@ -1311,6 +1584,93 @@ function renderTotalHours() {
             <span class="hours-item-value">${activity.hours || 0} hours</span>
         </div>
     `).join('');
+}
+
+function renderHoursCircles({ normalApproved, v2Approved, pendingTotal }) {
+    const host = document.getElementById('hours-circles');
+    if (!host) return;
+
+    const normalMax = 100;
+    const v2Max = 20;
+    const pendingMax = 100;
+
+    const safeNormal = Math.max(0, Number(normalApproved || 0));
+    const safeV2 = Math.max(0, Number(v2Approved || 0));
+    const safePending = Math.max(0, Number(pendingTotal || 0));
+
+    if (!host.dataset.initialized) {
+        host.dataset.initialized = '1';
+        host.innerHTML = `
+            <div class="hours-circles">
+                <div class="hours-circles-visual" style="position: relative;">
+                    <svg class="hours-circles-svg" viewBox="0 0 120 120" aria-label="Hours summary">
+                        <!-- Tracks -->
+                        <circle class="hours-circles-ring-track" cx="60" cy="60" r="46" stroke-width="10"></circle>
+                        <circle class="hours-circles-ring-track" cx="60" cy="60" r="36" stroke-width="10"></circle>
+                        <circle class="hours-circles-ring-track" cx="60" cy="60" r="26" stroke-width="10"></circle>
+
+                        <!-- Rings -->
+                        <circle id="ring-normal" class="hours-circles-ring" cx="60" cy="60" r="46" stroke-width="10" stroke="#22c55e"></circle>
+                        <circle id="ring-v2" class="hours-circles-ring" cx="60" cy="60" r="36" stroke-width="10" stroke="#3b82f6"></circle>
+                        <circle id="ring-pending" class="hours-circles-ring" cx="60" cy="60" r="26" stroke-width="10" stroke="#f59e0b"></circle>
+                    </svg>
+                    <div class="hours-circles-center">
+                        <div class="hours-circles-center-value" id="circle-center-total">0.0h</div>
+                        <div class="hours-circles-center-sub">
+                            Pending: <span id="circle-center-pending" style="color: var(--dark-gray);">0.0h</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="hours-circles-legend">
+                    <div class="hours-circles-legend-item">
+                        <div class="hours-circles-legend-left">
+                            <span class="hours-circles-dot" style="background:#22c55e;"></span>
+                            <div class="hours-circles-legend-title">Normal (approved)</div>
+                        </div>
+                        <div class="hours-circles-legend-meta" id="legend-normal">0 / 100</div>
+                    </div>
+                    <div class="hours-circles-legend-item">
+                        <div class="hours-circles-legend-left">
+                            <span class="hours-circles-dot" style="background:#3b82f6;"></span>
+                            <div class="hours-circles-legend-title">Intern/Extern (approved)</div>
+                        </div>
+                        <div class="hours-circles-legend-meta" id="legend-v2">0 / 20</div>
+                    </div>
+                    <div class="hours-circles-legend-item">
+                        <div class="hours-circles-legend-left">
+                            <span class="hours-circles-dot" style="background:#f59e0b;"></span>
+                            <div class="hours-circles-legend-title">Pending (total)</div>
+                        </div>
+                        <div class="hours-circles-legend-meta" id="legend-pending">0</div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    const setRing = (elId, r, value, max) => {
+        const el = document.getElementById(elId);
+        if (!el) return;
+        const circumference = 2 * Math.PI * r;
+        const pct = max > 0 ? Math.max(0, Math.min(1, value / max)) : 0;
+        el.style.strokeDasharray = `${circumference.toFixed(2)} ${circumference.toFixed(2)}`;
+        el.style.strokeDashoffset = `${(circumference * (1 - pct)).toFixed(2)}`;
+    };
+
+    setRing('ring-normal', 46, Math.min(safeNormal, normalMax), normalMax);
+    setRing('ring-v2', 36, Math.min(safeV2, v2Max), v2Max);
+    setRing('ring-pending', 26, Math.min(safePending, pendingMax), pendingMax);
+
+    const center = document.getElementById('circle-center-total');
+    if (center) center.textContent = `${safeNormal.toFixed(1)}h`;
+    const centerPending = document.getElementById('circle-center-pending');
+    if (centerPending) centerPending.textContent = `${safePending.toFixed(1)}h`;
+    const ln = document.getElementById('legend-normal');
+    const lv2 = document.getElementById('legend-v2');
+    const lp = document.getElementById('legend-pending');
+    if (ln) ln.textContent = `${safeNormal.toFixed(1)} / ${normalMax}`;
+    if (lv2) lv2.textContent = `${safeV2.toFixed(1)} / ${v2Max}`;
+    if (lp) lp.textContent = `${safePending.toFixed(1)} h`;
 }
 
 // Render payments
@@ -1391,7 +1751,7 @@ async function fetchVolunteerInfoForParticipants(participants) {
     const list = (participants || []).map(x => (x || '').trim()).filter(Boolean);
     const map = {};
     list.forEach(x => {
-        map[x.toLowerCase()] = { displayName: x, rank: null };
+        map[x.toLowerCase()] = { displayName: x, rank: null, phone: null };
     });
     if (list.length === 0) return map;
 
@@ -1405,7 +1765,7 @@ async function fetchVolunteerInfoForParticipants(participants) {
     const orFilter = `or=(${orParts.join(',')})`;
 
     try {
-        const res = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_VOLUNTEER_TABLE}?select=Email,NumeComplet,Privilegii&${orFilter}`, {
+        let res = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_VOLUNTEER_TABLE}?select=Email,NumeComplet,Privilegii,Telefon&${orFilter}`, {
             method: 'GET',
             headers: {
                 'apikey': SUPABASE_KEY,
@@ -1413,19 +1773,31 @@ async function fetchVolunteerInfoForParticipants(participants) {
                 'Content-Type': 'application/json',
             },
         });
+        if (!res.ok) {
+            // Backwards-compatible retry if Telefon doesn't exist yet
+            res = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_VOLUNTEER_TABLE}?select=Email,NumeComplet,Privilegii&${orFilter}`, {
+                method: 'GET',
+                headers: {
+                    'apikey': SUPABASE_KEY,
+                    'Authorization': `Bearer ${SUPABASE_KEY}`,
+                    'Content-Type': 'application/json',
+                },
+            });
+        }
         if (!res.ok) return map;
         const rows = await res.json();
         rows.forEach(v => {
             const email = (v.Email || '').trim();
             const name = (v.NumeComplet || '').trim();
             const rank = (v.Privilegii || '').trim() || null;
+            const phone = (v.Telefon || '').trim() || null;
             const display = name || email || 'Unknown';
 
             if (email) {
-                map[email.toLowerCase()] = { displayName: display, rank };
+                map[email.toLowerCase()] = { displayName: display, rank, phone };
             }
             if (name) {
-                map[name.toLowerCase()] = { displayName: display, rank };
+                map[name.toLowerCase()] = { displayName: display, rank, phone };
             }
         });
         return map;
@@ -1493,7 +1865,7 @@ async function forceAddParticipantToActivitySupabase(activity, rawIdentifier) {
 async function loadAllVolunteersForOwner() {
     if (!isOwner) return;
     try {
-        const res = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_VOLUNTEER_TABLE}?select=id,NumeComplet,Email,OreVoluntariat,OreNeaprobate,Privilegii`, {
+        let res = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_VOLUNTEER_TABLE}?select=id,NumeComplet,Email,Telefon,Disponibilitate,Departament,OreVoluntariat,OreNeaprobate,OreNeaprobateV2,OreAprobateV2,Privilegii`, {
             method: 'GET',
             headers: {
                 'apikey': SUPABASE_KEY,
@@ -1504,8 +1876,21 @@ async function loadAllVolunteersForOwner() {
 
         if (!res.ok) {
             const text = await res.text();
-            console.error('Failed to load volunteers for stats', res.status, text);
-            return;
+            console.error('Failed to load volunteers for stats (extended columns)', res.status, text);
+            // Backwards-compatible retry if new columns don't exist yet
+            res = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_VOLUNTEER_TABLE}?select=id,NumeComplet,Email,OreVoluntariat,OreNeaprobate,Privilegii`, {
+                method: 'GET',
+                headers: {
+                    'apikey': SUPABASE_KEY,
+                    'Authorization': `Bearer ${SUPABASE_KEY}`,
+                    'Content-Type': 'application/json',
+                },
+            });
+            if (!res.ok) {
+                const text2 = await res.text();
+                console.error('Failed to load volunteers for stats (fallback)', res.status, text2);
+                return;
+            }
         }
 
         allVolunteers = await res.json();
@@ -1657,6 +2042,40 @@ async function changeVolunteerRank(volunteerId, newRank) {
     }
 }
 
+// Change a volunteer's departament (Owner only)
+async function changeVolunteerDepartament(volunteerId, newDepartament) {
+    if (!isOwner || !volunteerId) return;
+    showLoading('Updating departament...');
+    try {
+        const dep = (newDepartament || '').trim() || null;
+        const payload = { Departament: dep };
+        const res = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_VOLUNTEER_TABLE}?id=eq.${volunteerId}`, {
+            method: 'PATCH',
+            headers: {
+                'apikey': SUPABASE_KEY,
+                'Authorization': `Bearer ${SUPABASE_KEY}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(payload)
+        });
+        if (!res.ok) {
+            const text = await res.text();
+            console.error('Failed to update departament', res.status, text);
+            alert('Failed to update departament. Please try again.');
+            return;
+        }
+        allVolunteers = allVolunteers.map(v =>
+            v.id === volunteerId ? { ...v, Departament: dep } : v
+        );
+        renderVolunteerStats();
+    } catch (err) {
+        console.error('Error updating departament', err);
+        alert('Error updating departament. Please try again.');
+    } finally {
+        hideLoading();
+    }
+}
+
 // Render owner-only volunteer stats tab
 function renderVolunteerStats() {
     const container = document.getElementById('volunteer-stats-content');
@@ -1729,10 +2148,19 @@ function renderVolunteerStats() {
                 <div class="payment-item-description">${escapeHtml(v.NumeComplet || v.Email || 'Unknown')}</div>
                 <div class="payment-item-date">${escapeHtml(v.Email || '')}</div>
                 <div style="margin-top: 4px; font-size: 0.8rem; color: var(--gray);">
+                    Telefon: <strong>${escapeHtml(v.Telefon || '—')}</strong>
+                </div>
+                <div style="margin-top: 4px; font-size: 0.8rem; color: var(--gray);">
+                    Disponibilitate: <strong>${escapeHtml(v.Disponibilitate || '—')}</strong>
+                </div>
+                <div style="margin-top: 4px; font-size: 0.8rem; color: var(--gray);">
                     Checklist activities done: <strong>${checklistDone}</strong>
                 </div>
                 <div style="margin-top: 4px; font-size: 0.8rem; color: var(--gray);">
                     Pending hours (total): <strong>${pending.toFixed(1)}</strong>
+                </div>
+                <div style="margin-top: 4px; font-size: 0.8rem; color: var(--gray);">
+                    Voluntariat Intern/Extern: <strong>${Number(v.OreAprobateV2 || 0).toFixed(1)}</strong> approved · <strong>${Number(v.OreNeaprobateV2 || 0).toFixed(1)}</strong> pending
                 </div>
                 ${pendingHtml}
                 <div style="margin-top: 6px; display: flex; align-items: center; gap: 8px;">
@@ -1741,6 +2169,19 @@ function renderVolunteerStats() {
                         ${buildRankOptionsHtml(v.Privilegii || '')}
                     </select>
                 </div>
+                ${(String(v.Privilegii || '').trim() && String(v.Privilegii || '').trim() !== 'Voluntar') ? `
+                    <div style="margin-top: 6px; display: flex; align-items: center; gap: 8px;">
+                        <span style="font-size: 0.85rem; color: var(--gray);">Departament:</span>
+                        <select class="volunteer-rank-select" onchange="changeVolunteerDepartament(${v.id}, this.value)">
+                            <option value="">—</option>
+                            ${DEPARTAMENT_OPTIONS.map(opt => {
+                                const sel = (String(v.Departament || '').trim() === opt) ? ' selected' : '';
+                                const safe = escapeHtml(opt);
+                                return `<option value="${safe}"${sel}>${safe}</option>`;
+                            }).join('')}
+                        </select>
+                    </div>
+                ` : ``}
             </div>
             <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px;">
                 <span class="payment-item-amount">${(v.OreVoluntariat || 0).toFixed ? v.OreVoluntariat.toFixed(1) : Number(v.OreVoluntariat || 0).toFixed(1)} h</span>
@@ -1756,7 +2197,7 @@ async function loadCurrentVolunteerHoursFromSupabase() {
     const email = (user && user.email) ? user.email.trim() : '';
     if (!email) return;
     try {
-        const res = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_VOLUNTEER_TABLE}?Email=eq.${encodeURIComponent(email)}&select=id,OreVoluntariat,OreNeaprobate`, {
+        let res = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_VOLUNTEER_TABLE}?Email=eq.${encodeURIComponent(email)}&select=id,OreVoluntariat,OreNeaprobate,OreNeaprobateV2,OreAprobateV2`, {
             method: 'GET',
             headers: {
                 'apikey': SUPABASE_KEY,
@@ -1764,11 +2205,24 @@ async function loadCurrentVolunteerHoursFromSupabase() {
                 'Content-Type': 'application/json',
             },
         });
+        if (!res.ok) {
+            // Backwards-compatible retry if V2 columns don't exist yet
+            res = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_VOLUNTEER_TABLE}?Email=eq.${encodeURIComponent(email)}&select=id,OreVoluntariat,OreNeaprobate`, {
+                method: 'GET',
+                headers: {
+                    'apikey': SUPABASE_KEY,
+                    'Authorization': `Bearer ${SUPABASE_KEY}`,
+                    'Content-Type': 'application/json',
+                },
+            });
+        }
         if (!res.ok) return;
         const rows = await res.json();
         const row = rows && rows[0] ? rows[0] : null;
         currentVolunteerHoursApproved = Number(row?.OreVoluntariat || 0);
         currentVolunteerHoursPending = Number(row?.OreNeaprobate || 0);
+        currentVolunteerHoursPendingV2 = Number(row?.OreNeaprobateV2 || 0);
+        currentVolunteerHoursApprovedV2 = Number(row?.OreAprobateV2 || 0);
     } catch (err) {
         console.error('Error loading current volunteer hours', err);
     }
@@ -1820,6 +2274,45 @@ async function ensureVolunteerRowExistsForCurrentUser() {
     }
 }
 
+// Upsert extra fields into Voluntari row for current user (Telefon, Disponibilitate, Departament, etc.)
+async function upsertVolunteerFieldsForCurrentUser(fields) {
+    const user = getCurrentUser();
+    const email = (user && user.email) ? user.email.trim() : '';
+    if (!email) return;
+
+    const cleaned = {};
+    Object.keys(fields || {}).forEach(k => {
+        const v = fields[k];
+        if (v === undefined) return;
+        cleaned[k] = v === null ? null : String(v).trim();
+    });
+    if (Object.keys(cleaned).length === 0) return;
+
+    const existing = await ensureVolunteerRowExistsForCurrentUser();
+    const volunteerId = existing?.id;
+
+    // PATCH by email if id is missing (shouldn't happen, but safe)
+    const filter = volunteerId ? `id=eq.${volunteerId}` : `Email=eq.${encodeURIComponent(email)}`;
+
+    try {
+        const res = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_VOLUNTEER_TABLE}?${filter}`, {
+            method: 'PATCH',
+            headers: {
+                'apikey': SUPABASE_KEY,
+                'Authorization': `Bearer ${SUPABASE_KEY}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(cleaned)
+        });
+        if (!res.ok) {
+            const text = await res.text();
+            console.error('Failed to update Voluntari fields', res.status, text);
+        }
+    } catch (err) {
+        console.error('Error updating Voluntari fields', err);
+    }
+}
+
 async function addPendingHoursForCurrentVolunteer(hoursToAdd) {
     const hours = Number(hoursToAdd || 0);
     if (!hours) return;
@@ -1860,6 +2353,59 @@ async function addPendingHoursForCurrentVolunteer(hoursToAdd) {
         currentVolunteerHoursPending = nextPending;
     } catch (err) {
         console.error('Error adding pending hours', err);
+    }
+}
+
+async function addPendingHoursV2ForCurrentVolunteer(hoursToAdd) {
+    const hours = Number(hoursToAdd || 0);
+    if (!hours) return;
+
+    const user = getCurrentUser();
+    const email = (user && user.email) ? user.email.trim() : '';
+    if (!email) return;
+
+    await ensureVolunteerRowExistsForCurrentUser();
+
+    try {
+        // Read current pending hours, then PATCH with new value
+        let res = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_VOLUNTEER_TABLE}?Email=eq.${encodeURIComponent(email)}&select=id,OreNeaprobateV2`, {
+            method: 'GET',
+            headers: {
+                'apikey': SUPABASE_KEY,
+                'Authorization': `Bearer ${SUPABASE_KEY}`,
+                'Content-Type': 'application/json',
+            },
+        });
+
+        if (!res.ok) {
+            const text = await res.text();
+            console.error('Failed to read OreNeaprobateV2', res.status, text);
+            return;
+        }
+
+        const rows = await res.json();
+        const row = rows && rows[0] ? rows[0] : null;
+        if (!row?.id) return;
+        const currentPending = Number(row.OreNeaprobateV2 || 0);
+        const nextPending = currentPending + hours;
+
+        const patchRes = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_VOLUNTEER_TABLE}?id=eq.${row.id}`, {
+            method: 'PATCH',
+            headers: {
+                'apikey': SUPABASE_KEY,
+                'Authorization': `Bearer ${SUPABASE_KEY}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ OreNeaprobateV2: nextPending })
+        });
+        if (!patchRes.ok) {
+            const text = await patchRes.text();
+            console.error('Failed to update OreNeaprobateV2', patchRes.status, text);
+            return;
+        }
+        currentVolunteerHoursPendingV2 = nextPending;
+    } catch (err) {
+        console.error('Error adding pending hours V2', err);
     }
 }
 
@@ -1976,6 +2522,51 @@ async function createPendingParticipationForCurrentUser(activity) {
     await addPendingHoursForCurrentVolunteer(hours);
 }
 
+// Custom pending participation (no ActivityId), used for Voluntariat Intern/Extern.
+async function createCustomPendingParticipation(activityName, hoursValue) {
+    const user = getCurrentUser();
+    const email = (user && user.email) ? user.email.trim().toLowerCase() : '';
+    if (!email) return;
+
+    const name = (activityName || '').trim();
+    const hours = Number(hoursValue || 0);
+    if (!name || !hours) return;
+
+    await ensureVolunteerRowExistsForCurrentUser();
+
+    try {
+        const payload = {
+            VolunteerEmail: email,
+            ActivityId: null,
+            ActivityName: name,
+            Hours: hours,
+            Status: 'Pending'
+        };
+        const res = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_PARTICIPATION_TABLE}?select=*`, {
+            method: 'POST',
+            headers: {
+                'apikey': SUPABASE_KEY,
+                'Authorization': `Bearer ${SUPABASE_KEY}`,
+                'Content-Type': 'application/json',
+                'Prefer': 'return=representation'
+            },
+            body: JSON.stringify(payload)
+        });
+        if (!res.ok) {
+            const text = await res.text();
+            console.error('Failed to create custom participation record', res.status, text);
+            alert('Failed to send for approval. Please try again.');
+            return;
+        }
+    } catch (err) {
+        console.error('Error creating custom participation record', err);
+        alert('Failed to send for approval. Please try again.');
+        return;
+    }
+
+    await addPendingHoursV2ForCurrentVolunteer(hours);
+}
+
 async function approveParticipation(participationId) {
     if (!isOwner || !participationId) return;
     showLoading('Approving activity...');
@@ -1997,7 +2588,11 @@ async function approveParticipation(participationId) {
         const hours = Number(row.Hours || 0);
         if (!email || !hours) return;
 
-        const vRes = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_VOLUNTEER_TABLE}?Email=eq.${encodeURIComponent(email)}&select=id,OreVoluntariat,OreNeaprobate`, {
+        const isV2 =
+            (!row.ActivityId || String(row.ActivityId).trim() === '') &&
+            ['Voluntariat Intern', 'Voluntariat Extern'].includes(String(row.ActivityName || '').trim());
+
+        let vRes = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_VOLUNTEER_TABLE}?Email=eq.${encodeURIComponent(email)}&select=id,OreVoluntariat,OreNeaprobate,OreNeaprobateV2,OreAprobateV2`, {
             method: 'GET',
             headers: {
                 'apikey': SUPABASE_KEY,
@@ -2012,7 +2607,16 @@ async function approveParticipation(participationId) {
 
         const approved = Number(vRow.OreVoluntariat || 0);
         const pending = Number(vRow.OreNeaprobate || 0);
+        const pendingV2 = Number(vRow.OreNeaprobateV2 || 0);
+        const approvedV2 = Number(vRow.OreAprobateV2 || 0);
+
         const nextPending = Math.max(0, pending - hours);
+        const nextPendingV2 = Math.max(0, pendingV2 - hours);
+        const nextApprovedV2 = approvedV2 + hours;
+
+        const volunteerPayload = isV2
+            ? { OreNeaprobateV2: nextPendingV2, OreAprobateV2: nextApprovedV2 }
+            : { OreVoluntariat: approved + hours, OreNeaprobate: nextPending };
 
         await Promise.all([
             fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_VOLUNTEER_TABLE}?id=eq.${vRow.id}`, {
@@ -2022,7 +2626,7 @@ async function approveParticipation(participationId) {
                     'Authorization': `Bearer ${SUPABASE_KEY}`,
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({ OreVoluntariat: approved + hours, OreNeaprobate: nextPending })
+                body: JSON.stringify(volunteerPayload)
             }),
             fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_PARTICIPATION_TABLE}?id=eq.${participationId}`, {
                 method: 'PATCH',
@@ -2067,7 +2671,11 @@ async function declineParticipation(participationId) {
         const hours = Number(row.Hours || 0);
         if (!email || !hours) return;
 
-        const vRes = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_VOLUNTEER_TABLE}?Email=eq.${encodeURIComponent(email)}&select=id,OreNeaprobate`, {
+        const isV2 =
+            (!row.ActivityId || String(row.ActivityId).trim() === '') &&
+            ['Voluntariat Intern', 'Voluntariat Extern'].includes(String(row.ActivityName || '').trim());
+
+        let vRes = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_VOLUNTEER_TABLE}?Email=eq.${encodeURIComponent(email)}&select=id,OreNeaprobate,OreNeaprobateV2`, {
             method: 'GET',
             headers: {
                 'apikey': SUPABASE_KEY,
@@ -2081,7 +2689,13 @@ async function declineParticipation(participationId) {
         if (!vRow?.id) return;
 
         const pending = Number(vRow.OreNeaprobate || 0);
+        const pendingV2 = Number(vRow.OreNeaprobateV2 || 0);
         const nextPending = Math.max(0, pending - hours);
+        const nextPendingV2 = Math.max(0, pendingV2 - hours);
+
+        const volunteerPayload = isV2
+            ? { OreNeaprobateV2: nextPendingV2 }
+            : { OreNeaprobate: nextPending };
 
         await Promise.all([
             fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_VOLUNTEER_TABLE}?id=eq.${vRow.id}`, {
@@ -2091,7 +2705,7 @@ async function declineParticipation(participationId) {
                     'Authorization': `Bearer ${SUPABASE_KEY}`,
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({ OreNeaprobate: nextPending })
+                body: JSON.stringify(volunteerPayload)
             }),
             fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_PARTICIPATION_TABLE}?id=eq.${participationId}`, {
                 method: 'PATCH',
@@ -2133,6 +2747,7 @@ window.deletePayment = deletePayment;
 window.selectActivityForJoin = selectActivityForJoin;
 window.showParticipants = showParticipants;
 window.changeVolunteerRank = changeVolunteerRank;
+window.changeVolunteerDepartament = changeVolunteerDepartament;
 window.approveVolunteerPendingHours = approveVolunteerPendingHours;
 window.approveParticipation = approveParticipation;
 window.declineParticipation = declineParticipation;
