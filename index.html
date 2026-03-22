@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Un strop de fericire - AUSF</title>
-    <link rel="stylesheet" href="styles.css?v=3">
+    <link rel="stylesheet" href="styles.css?v=10">
 </head>
 <body>
     <div class="container">
@@ -18,7 +18,7 @@
             <button id="logout-btn" class="logout-btn" onclick="handleLogout()">Log out</button>
         </div>
 
-        <nav class="tabs">
+        <nav class="tabs" role="tablist" aria-label="Main sections">
             <button class="tab-btn active" data-tab="current-activities">Current Activities</button>
             <button class="tab-btn" data-tab="my-activities">My Activities</button>
             <button class="tab-btn" data-tab="checklist">Checklist</button>
@@ -115,7 +115,36 @@
                     <h2>Total Hours Participated</h2>
                     <p class="section-subtitle">View your total participation hours</p>
                 </div>
-                
+
+                <div class="user-profile-panel user-profile-panel--in-tab" id="user-profile-panel">
+                    <div class="user-profile-panel-inner">
+                        <div class="user-profile-field">
+                            <label for="profile-disponibilitate" class="user-profile-label">Disponibilitate</label>
+                            <select id="profile-disponibilitate" class="user-profile-select" aria-label="Disponibilitate">
+                                <option value="">— Alege —</option>
+                                <option value="Dimineata">Dimineata</option>
+                                <option value="Seara">Seara</option>
+                            </select>
+                        </div>
+                        <div class="user-profile-field user-profile-field--dept" id="profile-departament-wrap" style="display: none;">
+                            <label for="profile-departament" class="user-profile-label">Departament</label>
+                            <select id="profile-departament" class="user-profile-select" aria-label="Departament"></select>
+                        </div>
+                    </div>
+                    <p class="user-profile-hint" id="profile-save-hint"></p>
+                </div>
+
+                <div class="stats-box">
+                    <div class="hours-card">
+                        <div class="card-icon">⏱️</div>
+                        <div class="hours-number" id="total-hours-display">0</div>
+                        <div class="hours-label">Total Hours</div>
+                    </div>
+                    <div class="hours-card hours-card--pending">
+                        <div class="card-icon">⏳</div>
+                        <div class="hours-number" id="pending-hours-display">0</div>
+                        <div class="hours-label">Pending Approval</div>
+                    </div>
                 </div>
                 <div id="hours-circles"></div>
                 <div class="breakdown-box">
@@ -258,6 +287,19 @@
                     <label for="activity-location">Location</label>
                     <input type="text" id="activity-location" placeholder="e.g., Community Center">
                 </div>
+                <div class="form-group" id="activity-departments-group">
+                    <label id="activity-dept-dropdown-label-wrap"><span class="label-icon">🏷️</span> Departament (activitate)</label>
+                    <p class="box-subtitle" style="margin-bottom: 10px;">Alege unul sau mai multe din listă</p>
+                    <div class="activity-dept-dropdown" id="activity-dept-dropdown">
+                        <button type="button" class="activity-dept-dropdown-trigger" id="activity-dept-dropdown-trigger" aria-haspopup="listbox" aria-expanded="false" aria-controls="activity-dept-dropdown-panel">
+                            <span class="activity-dept-dropdown-trigger-text" id="activity-dept-dropdown-label">Alege departament(e)…</span>
+                            <span class="activity-dept-dropdown-chevron" aria-hidden="true">▾</span>
+                        </button>
+                        <div class="activity-dept-dropdown-panel" id="activity-dept-dropdown-panel" hidden role="listbox" aria-labelledby="activity-dept-dropdown-label-wrap">
+                            <div class="activity-dept-checkboxes" id="activity-departments-checkboxes"></div>
+                        </div>
+                    </div>
+                </div>
                 <div class="form-group">
                     <label for="activity-organiser">Organiser</label>
                     <div class="checklist-combobox">
@@ -341,6 +383,20 @@
         </div>
     </div>
 
+    <!-- Quick join from Current Activities tab -->
+    <div class="modal" id="join-activity-quick-modal">
+        <div class="modal-content modal-content--compact">
+            <span class="close" id="close-join-quick-modal">&times;</span>
+            <h2>Join activity</h2>
+            <p class="join-quick-activity-name" id="join-quick-activity-name"></p>
+            <p class="join-quick-prompt" id="join-quick-prompt">Do you want to join this activity?</p>
+            <div class="join-quick-actions">
+                <button type="button" class="submit-btn" id="join-quick-confirm-btn">Yes, join</button>
+                <button type="button" class="join-quick-cancel-btn" id="join-quick-cancel-btn">Cancel</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Modal for viewing participants -->
     <div class="modal" id="participants-modal">
         <div class="modal-content">
@@ -371,7 +427,7 @@
         <p class="loading-text">Processing...</p>
     </div>
 
-    <script src="script.js?v=3"></script>
+    <script src="script.js?v=7"></script>
 </body>
 </html>
 

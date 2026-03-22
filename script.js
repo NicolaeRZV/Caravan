@@ -20,6 +20,7 @@ let pendingParticipationsForOwner = []; // Owner-only: per-activity pending hour
 // Activity modal: organiser + participants selected from Voluntari pool
 let activityOrganiserSelectedEmail = '';
 let activitySelectedParticipantEmails = []; // array of lowercased emails
+let quickJoinActivityRef = null; // activity opened from "Join" on Current Activities card
 
 const DEPARTAMENT_OPTIONS = [
     'STEAM',
@@ -29,6 +30,54 @@ const DEPARTAMENT_OPTIONS = [
     'Minte sanatoasa',
     'Book Club'
 ];
+
+// Activitati table: comma-separated department names (same list as Voluntari)
+const ACTIVITY_DEPARTMENT_COLUMN = 'Departament';
+
+function parseActivityDepartments(raw) {
+    if (raw == null || raw === '') return [];
+    return String(raw)
+        .split(',')
+        .map(s => s.trim())
+        .filter(Boolean)
+        .filter(d => DEPARTAMENT_OPTIONS.includes(d));
+}
+
+function departmentsToStorageString(arr) {
+    const uniq = [...new Set((arr || []).filter(d => DEPARTAMENT_OPTIONS.includes(d)))];
+    return uniq.length ? uniq.join(', ') : null;
+}
+
+function departmentToSlug(d) {
+    return String(d || '')
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, '-')
+        .replace(/[^a-z0-9-]/g, '');
+}
+
+function getActivityCardClassName(activity) {
+    const parts = ['activity-card'];
+    if (activity.isChecklistSpecial) parts.push('activity-card-special');
+    const depts = activity.departments || [];
+    if (!depts.length) {
+        parts.push('activity-card-dept-none');
+    } else if (depts.length === 1) {
+        parts.push(`activity-card-dept-${departmentToSlug(depts[0])}`);
+    } else {
+        parts.push('activity-card-dept-multi');
+    }
+    return parts.join(' ');
+}
+
+function renderActivityDepartmentBadgesHtml(activity) {
+    const depts = activity.departments || [];
+    if (!depts.length) return '';
+    return `<div class="activity-dept-badges">${depts.map(d => {
+        const slug = departmentToSlug(d);
+        return `<span class="activity-dept-badge activity-dept-badge--${slug}">${escapeHtml(d)}</span>`;
+    }).join('')}</div>`;
+}
 
 const AUTH_STORAGE_KEY = 'ausf_auth';
 
@@ -125,6 +174,110 @@ async function setupAuthUI(user) {
         el.style.display = isOwner ? '' : 'none';
     });
     if (isOwner) loadAllVolunteersForOwner();
+
+    setupProfilePanel();
+    await loadMyVolunteerProfile();
+}
+
+let profilePanelInitialized = false;
+
+function setupProfilePanel() {
+    if (profilePanelInitialized) return;
+    const disp = document.getElementById('profile-disponibilitate');
+    const dept = document.getElementById('profile-departament');
+    const hint = document.getElementById('profile-save-hint');
+    if (!disp || !dept) return;
+    profilePanelInitialized = true;
+
+    dept.innerHTML =
+        '<option value="">— Alege —</option>' +
+        DEPARTAMENT_OPTIONS.map(
+            opt => `<option value="${escapeHtml(opt)}">${escapeHtml(opt)}</option>`
+        ).join('');
+
+    const showHint = (msg, isErr) => {
+        if (!hint) return;
+        hint.textContent = msg || '';
+        hint.style.color = isErr ? '#c62828' : 'var(--gray)';
+    };
+
+    disp.addEventListener('change', async () => {
+        showHint('Se salvează…');
+        showLoading('Salvare…');
+        try {
+            const val = (disp.value || '').trim();
+            await upsertVolunteerFieldsForCurrentUser({
+                Disponibilitate: val || null
+            });
+            await loadMyVolunteerProfile();
+            showHint('Disponibilitate salvată.');
+        } catch (e) {
+            showHint('Nu s-a putut salva. Încearcă din nou.', true);
+        } finally {
+            hideLoading();
+        }
+    });
+
+    dept.addEventListener('change', async () => {
+        if ((userPrivilegii || '').trim() === 'Voluntar') return;
+        showHint('Se salvează…');
+        showLoading('Salvare…');
+        try {
+            const val = (dept.value || '').trim();
+            await upsertVolunteerFieldsForCurrentUser({
+                Departament: val || null
+            });
+            await loadMyVolunteerProfile();
+            showHint('Departament salvat.');
+        } catch (e) {
+            showHint('Nu s-a putut salva. Încearcă din nou.', true);
+        } finally {
+            hideLoading();
+        }
+    });
+}
+
+async function loadMyVolunteerProfile() {
+    const user = getCurrentUser();
+    const email = (user && user.email) ? user.email.trim() : '';
+    if (!email) return;
+
+    const disp = document.getElementById('profile-disponibilitate');
+    const deptWrap = document.getElementById('profile-departament-wrap');
+    const dept = document.getElementById('profile-departament');
+
+    try {
+        const res = await fetch(
+            `${SUPABASE_URL}/rest/v1/${SUPABASE_VOLUNTEER_TABLE}?Email=eq.${encodeURIComponent(email)}&select=Disponibilitate,Departament,Privilegii`,
+            {
+                method: 'GET',
+                headers: {
+                    'apikey': SUPABASE_KEY,
+                    'Authorization': `Bearer ${SUPABASE_KEY}`,
+                    'Content-Type': 'application/json',
+                },
+            }
+        );
+        if (!res.ok) return;
+        const rows = await res.json();
+        const row = rows && rows[0] ? rows[0] : null;
+        const rank = ((row && row.Privilegii) ? row.Privilegii : userPrivilegii || '').trim();
+
+        if (disp) {
+            const d = (row && row.Disponibilitate) ? String(row.Disponibilitate).trim() : '';
+            disp.value = d === 'Dimineata' || d === 'Seara' ? d : '';
+        }
+        if (dept && deptWrap) {
+            const showDept = rank && rank !== 'Voluntar';
+            deptWrap.style.display = showDept ? '' : 'none';
+            if (showDept) {
+                const depVal = (row && row.Departament) ? String(row.Departament).trim() : '';
+                dept.value = DEPARTAMENT_OPTIONS.includes(depVal) ? depVal : '';
+            }
+        }
+    } catch (err) {
+        console.error('Error loading volunteer profile', err);
+    }
 }
 
 // Initialize
@@ -167,6 +320,8 @@ async function loadData() {
 
     // Load current volunteer hours (approved + pending)
     await loadCurrentVolunteerHoursFromSupabase();
+
+    await loadMyVolunteerProfile();
 }
 
 // Load hosted activities from Supabase
@@ -196,6 +351,8 @@ async function loadActivitiesFromSupabase() {
             const participantList = participantsText
                 ? participantsText.split(',').map(p => p.trim()).filter(Boolean)
                 : [];
+            const deptRaw = row[ACTIVITY_DEPARTMENT_COLUMN] != null ? row[ACTIVITY_DEPARTMENT_COLUMN] : '';
+            const departments = parseActivityDepartments(deptRaw);
 
             return {
                 id: row.id || Date.now(),
@@ -210,7 +367,9 @@ async function loadActivitiesFromSupabase() {
                 isChecklistSpecial: !!row[ACTIVITY_SPECIAL_CHECKLIST_NAME_COLUMN],
                 supabase_id: row.id,
                 participantsText,
-                participantsCount: new Set(participantList).size
+                participantsCount: new Set(participantList).size,
+                departments,
+                departmentsText: departmentsToStorageString(departments)
             };
         });
         
@@ -677,6 +836,7 @@ async function syncActivityToSupabase(type, activity) {
             Organizatori: activity.organiser || null,
             "Ora Organizarii": activity.timeInterval || null,
             Participanti: activity.participantsText || null,
+            [ACTIVITY_DEPARTMENT_COLUMN]: activity.departmentsText != null ? activity.departmentsText : null,
             // Optional link to checklist task (create this column in Supabase)
             [ACTIVITY_SPECIAL_CHECKLIST_NAME_COLUMN]: activity.specialChecklistName || null
         };
@@ -803,23 +963,140 @@ function setupTabs() {
     const tabButtons = document.querySelectorAll('.tab-btn');
     const tabContents = document.querySelectorAll('.tab-content');
 
+    function syncAria(activeBtn) {
+        tabButtons.forEach(btn => {
+            const isActive = btn === activeBtn;
+            btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
+            btn.setAttribute('tabindex', isActive ? '0' : '-1');
+        });
+    }
+
     tabButtons.forEach(button => {
+        button.setAttribute('role', 'tab');
+        button.setAttribute('id', `tab-btn-${button.getAttribute('data-tab')}`);
+        const panelId = button.getAttribute('data-tab');
+        const panel = document.getElementById(panelId);
+        if (panel) {
+            panel.setAttribute('role', 'tabpanel');
+            panel.setAttribute('aria-labelledby', button.id);
+        }
+        if (button.classList.contains('active')) {
+            syncAria(button);
+        }
+
         button.addEventListener('click', () => {
             const targetTab = button.getAttribute('data-tab');
 
-            // Remove active class from all
             tabButtons.forEach(btn => btn.classList.remove('active'));
             tabContents.forEach(content => content.classList.remove('active'));
 
-            // Add active class to clicked
             button.classList.add('active');
-            document.getElementById(targetTab).classList.add('active');
+            const targetEl = document.getElementById(targetTab);
+            if (targetEl) targetEl.classList.add('active');
+            syncAria(button);
+
+            // On narrow screens, keep the active tab visible in the horizontal strip
+            try {
+                button.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+            } catch (e) {
+                button.scrollIntoView();
+            }
+        });
+
+        button.addEventListener('keydown', (e) => {
+            const keys = ['ArrowLeft', 'ArrowRight', 'Home', 'End'];
+            if (!keys.includes(e.key)) return;
+            const visible = Array.from(tabButtons).filter(
+                b => b.offsetParent !== null && b.style.display !== 'none'
+            );
+            const i = visible.indexOf(button);
+            if (i < 0) return;
+            let target = null;
+            if (e.key === 'ArrowRight') target = visible[Math.min(visible.length - 1, i + 1)];
+            if (e.key === 'ArrowLeft') target = visible[Math.max(0, i - 1)];
+            if (e.key === 'Home') target = visible[0];
+            if (e.key === 'End') target = visible[visible.length - 1];
+            if (target && target !== button) {
+                e.preventDefault();
+                target.click();
+                target.focus();
+            }
         });
     });
+
+    const initiallyActive = document.querySelector('.tab-btn.active');
+    if (initiallyActive) syncAria(initiallyActive);
+}
+
+function updateActivityDeptDropdownLabel() {
+    const label = document.getElementById('activity-dept-dropdown-label');
+    if (!label) return;
+    const selected = Array.from(document.querySelectorAll('.activity-dept-checkbox:checked'))
+        .map(cb => cb.value)
+        .filter(d => DEPARTAMENT_OPTIONS.includes(d));
+    label.textContent = selected.length ? selected.join(', ') : 'Alege departament(e)…';
+}
+
+function closeActivityDepartmentDropdown() {
+    const panel = document.getElementById('activity-dept-dropdown-panel');
+    const trigger = document.getElementById('activity-dept-dropdown-trigger');
+    if (panel) panel.hidden = true;
+    if (trigger) {
+        trigger.setAttribute('aria-expanded', 'false');
+        trigger.classList.remove('is-open');
+    }
+}
+
+function setupActivityDepartmentDropdown() {
+    if (window._activityDeptDropdownSetup) return;
+    const wrap = document.getElementById('activity-dept-dropdown');
+    const trigger = document.getElementById('activity-dept-dropdown-trigger');
+    const panel = document.getElementById('activity-dept-dropdown-panel');
+    if (!wrap || !trigger || !panel) return;
+    window._activityDeptDropdownSetup = true;
+
+    function setOpen(open) {
+        panel.hidden = !open;
+        trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+        trigger.classList.toggle('is-open', !!open);
+    }
+
+    trigger.addEventListener('click', (e) => {
+        e.stopPropagation();
+        setOpen(panel.hidden);
+    });
+
+    panel.addEventListener('change', (e) => {
+        if (e.target && e.target.classList && e.target.classList.contains('activity-dept-checkbox')) {
+            updateActivityDeptDropdownLabel();
+        }
+    });
+
+    document.addEventListener('click', (e) => {
+        if (!wrap.contains(e.target)) setOpen(false);
+    });
+}
+
+function initActivityDepartmentCheckboxes() {
+    const host = document.getElementById('activity-departments-checkboxes');
+    if (!host || host.dataset.initialized) return;
+    host.dataset.initialized = '1';
+    host.innerHTML = DEPARTAMENT_OPTIONS.map(opt => {
+        const safeVal = String(opt).replace(/"/g, '&quot;');
+        return `
+        <label class="activity-dept-checkbox-label">
+            <input type="checkbox" class="activity-dept-checkbox" value="${safeVal}">
+            <span>${escapeHtml(opt)}</span>
+        </label>`;
+    }).join('');
+    updateActivityDeptDropdownLabel();
 }
 
 // Setup forms
 function setupForms() {
+    initActivityDepartmentCheckboxes();
+    setupActivityDepartmentDropdown();
+
     // Owner-only: Add New Activity - hide if not Owner (Join Activity stays visible for all)
     const addCurrentBtn = document.getElementById('add-current-activity');
     const addCurrentBox = addCurrentBtn?.closest('.action-box');
@@ -895,6 +1172,19 @@ function setupForms() {
     // Confirm join button
     document.getElementById('confirm-join-btn').addEventListener('click', confirmJoinActivity);
 
+    const joinQuickConfirm = document.getElementById('join-quick-confirm-btn');
+    const joinQuickCancel = document.getElementById('join-quick-cancel-btn');
+    const joinQuickClose = document.getElementById('close-join-quick-modal');
+    const joinQuickModal = document.getElementById('join-activity-quick-modal');
+    if (joinQuickConfirm) joinQuickConfirm.addEventListener('click', confirmQuickJoinActivity);
+    if (joinQuickCancel) joinQuickCancel.addEventListener('click', closeQuickJoinModal);
+    if (joinQuickClose) joinQuickClose.addEventListener('click', closeQuickJoinModal);
+    if (joinQuickModal) {
+        joinQuickModal.addEventListener('click', (e) => {
+            if (e.target.id === 'join-activity-quick-modal') closeQuickJoinModal();
+        });
+    }
+
     // Checklist owner form (add new checklist activity)
     const checklistForm = document.getElementById('checklist-form');
     if (checklistForm) {
@@ -959,6 +1249,12 @@ function openActivityModal(type) {
         if (activityChecklistValue) activityChecklistValue.value = '';
     }
 
+    document.querySelectorAll('.activity-dept-checkbox').forEach(cb => {
+        cb.checked = false;
+    });
+    closeActivityDepartmentDropdown();
+    updateActivityDeptDropdownLabel();
+
     modal.classList.add('active');
 }
 
@@ -985,7 +1281,8 @@ function openJoinActivityModal() {
     }
     
     listContainer.innerHTML = currentActivities.map(activity => `
-        <div class="activity-card ${activity.isChecklistSpecial ? 'activity-card-special' : ''}" style="cursor: pointer; margin-bottom: 10px;" data-activity-id="${activity.supabase_id}" onclick="selectActivityForJoin(${activity.supabase_id}, this)">
+        <div class="${getActivityCardClassName(activity)} join-activity-pick-card" style="cursor: pointer; margin-bottom: 10px;" data-activity-id="${activity.supabase_id}" onclick="selectActivityForJoin(${activity.supabase_id}, this)">
+            ${renderActivityDepartmentBadgesHtml(activity)}
             <h3>${escapeHtml(activity.name)}</h3>
             ${activity.isChecklistSpecial && activity.specialChecklistName ? `<div class="activity-special-badge">Checklist: ${escapeHtml(activity.specialChecklistName)}</div>` : ''}
             ${activity.description ? `<p>${escapeHtml(activity.description)}</p>` : ''}
@@ -1009,19 +1306,44 @@ function selectActivityForJoin(activityId, cardElement) {
     const confirmBtn = document.getElementById('confirm-join-btn');
     const listContainer = document.getElementById('join-activity-list');
     
-    // Highlight selected activity
-    listContainer.querySelectorAll('.activity-card').forEach(card => {
-        card.style.border = 'none';
-        card.style.backgroundColor = '';
+    listContainer.querySelectorAll('.join-activity-pick-card').forEach(card => {
+        card.classList.remove('join-activity-card-selected');
     });
-    
-    // Highlight the clicked card
+
     if (cardElement) {
-        cardElement.style.border = '2px solid #4CAF50';
-        cardElement.style.backgroundColor = '#f0f8f0';
+        cardElement.classList.add('join-activity-card-selected');
     }
     
     confirmBtn.style.display = 'block';
+}
+
+// Shared join flow (from "My Activities" join modal or quick join on Current Activities)
+async function performJoinActivity(activity, availability) {
+    if (!activity) return false;
+
+    const user = getCurrentUser();
+    const email = (user && user.email) ? user.email.trim().toLowerCase() : '';
+    const existingList = (activity.participantsText || '')
+        .split(',')
+        .map(x => x.trim())
+        .filter(Boolean)
+        .map(x => x.toLowerCase());
+    if (email && existingList.includes(email)) {
+        alert('You have already joined this activity.');
+        return false;
+    }
+
+    const availTrimmed = availability != null ? String(availability).trim() : '';
+    if (availTrimmed) {
+        await upsertVolunteerFieldsForCurrentUser({ Disponibilitate: availTrimmed });
+    }
+    await addParticipantToActivitySupabase(activity);
+    await createPendingParticipationForCurrentUser(activity);
+    await markChecklistDoneForActivity(activity);
+    await loadActivitiesFromSupabase();
+    await loadCurrentVolunteerHoursFromSupabase();
+    renderAll();
+    return true;
 }
 
 // Confirm joining activity
@@ -1036,40 +1358,41 @@ async function confirmJoinActivity() {
         alert('Please select your Disponibilitate (Dimineata or Seara).');
         return;
     }
-    
-    // Check if already joined (via Supabase participants)
-    const user = getCurrentUser();
-    const email = (user && user.email) ? user.email.trim().toLowerCase() : '';
-    const existingList = (selectedActivityForJoin.participantsText || '')
-        .split(',')
-        .map(x => x.trim())
-        .filter(Boolean)
-        .map(x => x.toLowerCase());
-    if (email && existingList.includes(email)) {
-        alert('You have already joined this activity.');
-        closeJoinModal();
-        return;
-    }
-    
+
     showLoading('Joining activity...');
     try {
-        await upsertVolunteerFieldsForCurrentUser({ Disponibilitate: availability });
+        const ok = await performJoinActivity(selectedActivityForJoin, availability);
+        if (ok) closeJoinModal();
+    } finally {
+        hideLoading();
+    }
+}
 
-        // Add current user to the activity's participants pool in Supabase (stores email)
-        await addParticipantToActivitySupabase(selectedActivityForJoin);
+function openQuickJoinModal(activityId) {
+    const activity = currentActivities.find(a => a.supabase_id === activityId);
+    if (!activity) return;
+    quickJoinActivityRef = activity;
+    const nameEl = document.getElementById('join-quick-activity-name');
+    if (nameEl) nameEl.textContent = activity.name || '';
+    const modal = document.getElementById('join-activity-quick-modal');
+    if (modal) modal.classList.add('active');
+}
 
-        // Create a per-activity pending record, then add to volunteer pending hours
-        await createPendingParticipationForCurrentUser(selectedActivityForJoin);
+function closeQuickJoinModal() {
+    const modal = document.getElementById('join-activity-quick-modal');
+    if (modal) modal.classList.remove('active');
+    quickJoinActivityRef = null;
+}
 
-        // If this activity is linked to a checklist task, mark that task as done for this user
-        await markChecklistDoneForActivity(selectedActivityForJoin);
+async function confirmQuickJoinActivity() {
+    const activity = quickJoinActivityRef;
+    if (!activity) return;
 
-        // Reload activities so participant counts and myActivities stay in sync
-        await loadActivitiesFromSupabase();
-        await loadCurrentVolunteerHoursFromSupabase();
-        renderAll();
-
-        closeJoinModal();
+    showLoading('Joining activity...');
+    try {
+        // No disponibilitate prompt here — optional update only when availability string is passed (My Activities join flow)
+        const ok = await performJoinActivity(activity, null);
+        if (ok) closeQuickJoinModal();
     } finally {
         hideLoading();
     }
@@ -1104,11 +1427,16 @@ async function openParticipantsModal(activity) {
             const info = infoMap[key] || null;
             const rank = info && info.rank ? info.rank : '—';
             const phone = info && info.phone ? info.phone : '—';
+            const showDept = rank && rank !== 'Voluntar' && info && info.department;
+            const deptLine = showDept
+                ? `<div style="font-size:0.8rem; color: var(--dark-gray); margin-top:2px;">Departament: <strong>${escapeHtml(info.department)}</strong></div>`
+                : '';
             return `
                 <div class="hours-item" style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
                     <span class="hours-item-name" style="min-width:0;">
                         <div style="font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(info?.displayName || raw)}</div>
                         <div style="font-size:0.8rem; color: var(--gray); margin-top:2px;">Telefon: ${escapeHtml(phone)}</div>
+                        ${deptLine}
                     </span>
                     <span class="activity-special-badge" style="margin:0; background: rgba(76, 175, 80, 0.12);">${escapeHtml(rank)}</span>
                 </div>
@@ -1180,6 +1508,11 @@ async function addActivity(type) {
             ? checklistValueInput.value.trim()
             : '';
 
+    const selectedDepts = Array.from(document.querySelectorAll('.activity-dept-checkbox:checked'))
+        .map(cb => cb.value)
+        .filter(d => DEPARTAMENT_OPTIONS.includes(d));
+    const departmentsText = departmentsToStorageString(selectedDepts);
+
     const activity = {
         name,
         description,
@@ -1190,7 +1523,9 @@ async function addActivity(type) {
         timeInterval: timeInterval || '',
         isChecklistSpecial,
         specialChecklistName: selectedChecklistName || null,
-        participantsText: participantsText || null
+        participantsText: participantsText || null,
+        departments: selectedDepts,
+        departmentsText
     };
 
     showLoading('Adding activity...');
@@ -1507,8 +1842,10 @@ function renderCurrentActivities() {
     }
 
     container.innerHTML = currentActivities.map(activity => `
-        <div class="activity-card ${activity.isChecklistSpecial ? 'activity-card-special' : ''}">
-            ${isOwner ? `<button class="delete-btn" onclick="deleteActivity('current', ${activity.supabase_id || activity.id})" title="Delete">×</button>` : ''}
+        <div class="${getActivityCardClassName(activity)}">
+            ${isOwner ? `<button type="button" class="delete-btn" onclick="event.stopPropagation(); deleteActivity('current', ${activity.supabase_id || activity.id})" title="Delete">×</button>` : ''}
+            <div class="activity-card-body-clickable" role="button" tabindex="0" onclick="openQuickJoinModal(${activity.supabase_id})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openQuickJoinModal(${activity.supabase_id});}" title="Click to join this activity">
+            ${renderActivityDepartmentBadgesHtml(activity)}
             <h3>${escapeHtml(activity.name)}</h3>
             ${activity.isChecklistSpecial && activity.specialChecklistName ? `<div class="activity-special-badge">Checklist: ${escapeHtml(activity.specialChecklistName)}</div>` : ''}
             ${activity.description ? `<p>${escapeHtml(activity.description)}</p>` : ''}
@@ -1516,7 +1853,8 @@ function renderCurrentActivities() {
             ${activity.organiser ? `<div class="activity-organiser">👤 ${escapeHtml(activity.organiser)}</div>` : ''}
             <div class="activity-date">📅 ${formatDate(activity.date)}</div>
             ${activity.timeInterval ? `<div class="activity-time">🕐 ${escapeHtml(activity.timeInterval)}</div>` : ''}
-            <div class="activity-participants clickable" onclick="showParticipants(${activity.supabase_id || activity.id})" title="View participants">
+            </div>
+            <div class="activity-participants clickable" onclick="event.stopPropagation(); showParticipants(${activity.supabase_id || activity.id})" title="View participants">
                 👥 ${activity.participantsCount || 0} participant${(activity.participantsCount || 0) === 1 ? '' : 's'}
             </div>
         </div>
@@ -1533,8 +1871,9 @@ function renderMyActivities() {
     }
 
     container.innerHTML = myActivities.map(activity => `
-        <div class="activity-card ${activity.isChecklistSpecial ? 'activity-card-special' : ''}">
+        <div class="${getActivityCardClassName(activity)}">
             <button class="delete-btn" onclick="deleteActivity('my', ${activity.my_activity_id || activity.id})" title="Leave activity">×</button>
+            ${renderActivityDepartmentBadgesHtml(activity)}
             <h3>${escapeHtml(activity.name)}</h3>
             ${activity.isChecklistSpecial && activity.specialChecklistName ? `<div class="activity-special-badge">Checklist: ${escapeHtml(activity.specialChecklistName)}</div>` : ''}
             ${activity.description ? `<p>${escapeHtml(activity.description)}</p>` : ''}
@@ -1751,7 +2090,7 @@ async function fetchVolunteerInfoForParticipants(participants) {
     const list = (participants || []).map(x => (x || '').trim()).filter(Boolean);
     const map = {};
     list.forEach(x => {
-        map[x.toLowerCase()] = { displayName: x, rank: null, phone: null };
+        map[x.toLowerCase()] = { displayName: x, rank: null, phone: null, department: null };
     });
     if (list.length === 0) return map;
 
@@ -1765,7 +2104,7 @@ async function fetchVolunteerInfoForParticipants(participants) {
     const orFilter = `or=(${orParts.join(',')})`;
 
     try {
-        let res = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_VOLUNTEER_TABLE}?select=Email,NumeComplet,Privilegii,Telefon&${orFilter}`, {
+        let res = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_VOLUNTEER_TABLE}?select=Email,NumeComplet,Privilegii,Telefon,Departament&${orFilter}`, {
             method: 'GET',
             headers: {
                 'apikey': SUPABASE_KEY,
@@ -1774,7 +2113,26 @@ async function fetchVolunteerInfoForParticipants(participants) {
             },
         });
         if (!res.ok) {
-            // Backwards-compatible retry if Telefon doesn't exist yet
+            res = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_VOLUNTEER_TABLE}?select=Email,NumeComplet,Privilegii,Telefon&${orFilter}`, {
+                method: 'GET',
+                headers: {
+                    'apikey': SUPABASE_KEY,
+                    'Authorization': `Bearer ${SUPABASE_KEY}`,
+                    'Content-Type': 'application/json',
+                },
+            });
+        }
+        if (!res.ok) {
+            res = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_VOLUNTEER_TABLE}?select=Email,NumeComplet,Privilegii,Departament&${orFilter}`, {
+                method: 'GET',
+                headers: {
+                    'apikey': SUPABASE_KEY,
+                    'Authorization': `Bearer ${SUPABASE_KEY}`,
+                    'Content-Type': 'application/json',
+                },
+            });
+        }
+        if (!res.ok) {
             res = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_VOLUNTEER_TABLE}?select=Email,NumeComplet,Privilegii&${orFilter}`, {
                 method: 'GET',
                 headers: {
@@ -1791,13 +2149,14 @@ async function fetchVolunteerInfoForParticipants(participants) {
             const name = (v.NumeComplet || '').trim();
             const rank = (v.Privilegii || '').trim() || null;
             const phone = (v.Telefon || '').trim() || null;
+            const department = (v.Departament || '').trim() || null;
             const display = name || email || 'Unknown';
 
             if (email) {
-                map[email.toLowerCase()] = { displayName: display, rank, phone };
+                map[email.toLowerCase()] = { displayName: display, rank, phone, department };
             }
             if (name) {
-                map[name.toLowerCase()] = { displayName: display, rank, phone };
+                map[name.toLowerCase()] = { displayName: display, rank, phone, department };
             }
         });
         return map;
@@ -2751,4 +3110,5 @@ window.changeVolunteerDepartament = changeVolunteerDepartament;
 window.approveVolunteerPendingHours = approveVolunteerPendingHours;
 window.approveParticipation = approveParticipation;
 window.declineParticipation = declineParticipation;
+window.openQuickJoinModal = openQuickJoinModal;
 

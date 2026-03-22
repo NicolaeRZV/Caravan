@@ -121,50 +121,139 @@ header::before {
     z-index: 1;
 }
 
+/* User profile: disponibilitate + departament (self-service) */
+.user-profile-panel {
+    background: linear-gradient(180deg, #ffffff 0%, #f3faf4 100%);
+    border-bottom: 1px solid rgba(46, 125, 50, 0.15);
+    padding: 12px 20px 14px;
+}
+
+.user-profile-panel--in-tab {
+    border-radius: 12px;
+    border: 2px solid rgba(46, 125, 50, 0.12);
+    margin-bottom: 22px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.04);
+}
+
+.user-profile-panel-inner {
+    max-width: 1200px;
+    margin: 0 auto;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 14px 20px;
+}
+
+.user-profile-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 160px;
+    flex: 1 1 200px;
+}
+
+.user-profile-label {
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    color: var(--primary-green);
+}
+
+.user-profile-select {
+    width: 100%;
+    max-width: 280px;
+    padding: 10px 14px;
+    border-radius: 10px;
+    border: 2px solid rgba(46, 125, 50, 0.25);
+    background: var(--white);
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--dark-gray);
+    cursor: pointer;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.user-profile-select:focus {
+    outline: none;
+    border-color: var(--bright-green);
+    box-shadow: 0 0 0 3px rgba(76, 175, 80, 0.2);
+}
+
+.user-profile-hint {
+    max-width: 1200px;
+    margin: 8px auto 0;
+    font-size: 0.82rem;
+    color: var(--gray);
+    min-height: 1.2em;
+}
+
 nav.tabs {
-    display: grid;
-    grid-template-columns: repeat(6, 1fr);
-    background: var(--light-gray);
-    border-bottom: 2px solid var(--light-green);
-    gap: 0;
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 8px;
+    padding: 12px 16px 14px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x proximity;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(46, 125, 50, 0.35) transparent;
+    background: linear-gradient(180deg, #eef7ef 0%, #e8f5e9 100%);
+    border-bottom: none;
+    box-shadow: inset 0 -1px 0 rgba(46, 125, 50, 0.12);
+}
+
+nav.tabs::-webkit-scrollbar {
+    height: 6px;
+}
+
+nav.tabs::-webkit-scrollbar-thumb {
+    background: rgba(46, 125, 50, 0.35);
+    border-radius: 999px;
 }
 
 .tab-btn {
-    flex: 1;
-    padding: 16px 12px;
-    border: none;
-    background: transparent;
+    flex: 0 0 auto;
+    scroll-snap-align: start;
+    padding: 11px 18px;
+    min-height: 44px;
+    border: 2px solid transparent;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.75);
     cursor: pointer;
-    font-size: 0.9rem;
-    font-weight: 500;
+    font-size: 0.88rem;
+    font-weight: 600;
     color: var(--dark-gray);
-    transition: all 0.3s ease;
-    position: relative;
+    transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
     white-space: nowrap;
-    text-overflow: ellipsis;
-    overflow: hidden;
     text-align: center;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
 }
 
 .tab-btn:hover {
     background: var(--white);
     color: var(--bright-green);
+    border-color: rgba(76, 175, 80, 0.35);
+    transform: translateY(-1px);
+}
+
+.tab-btn:focus-visible {
+    outline: none;
+    border-color: var(--bright-green);
+    box-shadow: 0 0 0 3px rgba(76, 175, 80, 0.25);
 }
 
 .tab-btn.active {
-    background: var(--white);
-    color: var(--bright-green);
-    font-weight: 600;
+    background: linear-gradient(135deg, var(--bright-green) 0%, var(--primary-green) 100%);
+    color: var(--white);
+    font-weight: 700;
+    border-color: rgba(255, 255, 255, 0.35);
+    box-shadow: 0 6px 18px rgba(46, 125, 50, 0.35);
 }
 
 .tab-btn.active::after {
-    content: '';
-    position: absolute;
-    bottom: -2px;
-    left: 0;
-    right: 0;
-    height: 3px;
-    background: var(--bright-yellow);
+    display: none;
 }
 
 .tab-content {
@@ -267,6 +356,289 @@ h3 {
 
 .activity-card-special:hover {
     box-shadow: 0 8px 24px rgba(255, 193, 7, 0.3);
+}
+
+/* Activity department dropdown (multi-select) */
+.activity-dept-dropdown {
+    position: relative;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+}
+
+.activity-dept-dropdown-trigger {
+    width: 100%;
+    max-width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 14px 16px;
+    border-radius: 12px;
+    border: 2px solid rgba(46, 125, 50, 0.28);
+    background: var(--white);
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--dark-gray);
+    cursor: pointer;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    text-align: left;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+.activity-dept-dropdown-trigger:hover {
+    border-color: var(--bright-green);
+}
+
+.activity-dept-dropdown-trigger.is-open {
+    border-color: var(--primary-green);
+    box-shadow: 0 0 0 3px rgba(76, 175, 80, 0.2);
+}
+
+/* Only the trigger text — avoid affecting other nodes */
+.activity-dept-dropdown-trigger #activity-dept-dropdown-label {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.activity-dept-dropdown-chevron {
+    flex-shrink: 0;
+    font-size: 0.75rem;
+    color: var(--primary-green);
+    transition: transform 0.2s ease;
+}
+
+.activity-dept-dropdown-trigger.is-open .activity-dept-dropdown-chevron {
+    transform: rotate(180deg);
+}
+
+.activity-dept-dropdown-panel {
+    position: absolute;
+    left: 0;
+    right: 0;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+    z-index: 120;
+    margin-top: 6px;
+    padding: 10px 8px;
+    background: var(--white);
+    border: 2px solid var(--bright-green);
+    border-radius: 12px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.12);
+    max-height: 260px;
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+.activity-dept-dropdown-panel[hidden] {
+    display: none !important;
+}
+
+/* Activity department (Activitati.Departament) — same labels as Voluntari */
+.activity-dept-checkboxes {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+    width: 100%;
+    min-width: 0;
+}
+
+/* Rows: full width, left-aligned — override .form-group label */
+#activity-departments-group .activity-dept-checkbox-label,
+.activity-dept-dropdown-panel .activity-dept-checkbox-label {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 10px;
+    margin: 0 !important;
+    padding: 8px 8px;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+    border-radius: 8px;
+    font-size: 0.88rem;
+    font-weight: 600;
+    color: var(--dark-gray);
+    cursor: pointer;
+    user-select: none;
+    line-height: 1.35;
+    text-align: left;
+}
+
+#activity-departments-group .activity-dept-checkbox-label:hover,
+.activity-dept-dropdown-panel .activity-dept-checkbox-label:hover {
+    background: rgba(76, 175, 80, 0.07);
+}
+
+#activity-departments-group .activity-dept-checkbox-label span,
+.activity-dept-dropdown-panel .activity-dept-checkbox-label span {
+    flex: 1 1 auto;
+    min-width: 0;
+    text-align: left;
+    overflow-wrap: break-word;
+    word-break: break-word;
+}
+
+/* Must beat later `.form-group input { width: 100% }` — otherwise checkbox stretches full width and labels sit off-screen */
+#activity-departments-group .activity-dept-checkbox-label input[type="checkbox"],
+.activity-dept-dropdown-panel .activity-dept-checkbox-label input[type="checkbox"] {
+    flex: 0 0 auto;
+    width: 18px;
+    max-width: 18px;
+    min-width: 18px;
+    height: 18px;
+    margin: 0;
+    padding: 0;
+    border: 2px solid rgba(46, 125, 50, 0.35);
+    border-radius: 4px;
+    accent-color: var(--bright-green);
+    box-sizing: border-box;
+}
+
+#activity-departments-group .activity-dept-checkbox-label input[type="checkbox"]:focus,
+.activity-dept-dropdown-panel .activity-dept-checkbox-label input[type="checkbox"]:focus {
+    transform: none;
+    box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.35);
+}
+
+.activity-dept-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 10px;
+}
+
+.activity-dept-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: var(--white);
+}
+
+.activity-dept-badge--steam { background: #7c3aed; }
+.activity-dept-badge--diy { background: #ea580c; }
+.activity-dept-badge--activitati-ciclism { background: #16a34a; }
+.activity-dept-badge--fun { background: #db2777; }
+.activity-dept-badge--minte-sanatoasa { background: #0891b2; }
+.activity-dept-badge--book-club { background: #ca8a04; }
+
+.activity-card-dept-none {
+    border-left: 5px solid #e5e7eb;
+}
+
+.activity-card-dept-multi {
+    border-left: 5px solid var(--bright-green);
+    background: linear-gradient(135deg, rgba(76, 175, 80, 0.06), rgba(255, 255, 255, 0.9));
+}
+
+.activity-card-dept-steam {
+    border-left: 6px solid #7c3aed;
+    background: linear-gradient(90deg, rgba(124, 58, 237, 0.08), var(--white));
+}
+
+.activity-card-dept-diy {
+    border-left: 6px solid #ea580c;
+    background: linear-gradient(90deg, rgba(234, 88, 12, 0.08), var(--white));
+}
+
+.activity-card-dept-activitati-ciclism {
+    border-left: 6px solid #16a34a;
+    background: linear-gradient(90deg, rgba(22, 163, 74, 0.1), var(--white));
+}
+
+.activity-card-dept-fun {
+    border-left: 6px solid #db2777;
+    background: linear-gradient(90deg, rgba(219, 39, 119, 0.08), var(--white));
+}
+
+.activity-card-dept-minte-sanatoasa {
+    border-left: 6px solid #0891b2;
+    background: linear-gradient(90deg, rgba(8, 145, 178, 0.08), var(--white));
+}
+
+.activity-card-dept-book-club {
+    border-left: 6px solid #ca8a04;
+    background: linear-gradient(90deg, rgba(202, 138, 4, 0.1), var(--white));
+}
+
+.join-activity-card-selected {
+    outline: 3px solid #4caf50 !important;
+    box-shadow: 0 0 0 4px rgba(76, 175, 80, 0.25) !important;
+}
+
+/* Current Activities: click upper area to join (confirm modal) */
+.activity-card-body-clickable {
+    cursor: pointer;
+    border-radius: 8px;
+    padding: 2px 8px 10px 2px;
+    margin: -2px -8px 0 -2px;
+    transition: background 0.2s ease, box-shadow 0.2s ease;
+}
+
+.activity-card-body-clickable:hover {
+    background: rgba(76, 175, 80, 0.08);
+    box-shadow: 0 0 0 1px rgba(76, 175, 80, 0.2);
+}
+
+.activity-card-body-clickable:focus {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(76, 175, 80, 0.25);
+}
+
+.modal-content--compact {
+    max-width: 440px;
+}
+
+.join-quick-activity-name {
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--primary-green);
+    margin: 8px 0 4px;
+    line-height: 1.35;
+}
+
+.join-quick-prompt {
+    font-size: 0.95rem;
+    color: var(--dark-gray);
+    margin: 12px 0 4px;
+    line-height: 1.45;
+}
+
+.join-quick-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 8px;
+}
+
+.join-quick-cancel-btn {
+    width: 100%;
+    padding: 12px 16px;
+    border-radius: 10px;
+    border: 2px solid var(--light-gray);
+    background: var(--light-gray);
+    color: var(--dark-gray);
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s ease;
+}
+
+.join-quick-cancel-btn:hover {
+    background: #e8e8e8;
 }
 
 .activity-special-badge {
@@ -1210,15 +1582,27 @@ h3 {
     }
 
     nav.tabs {
-        grid-template-columns: repeat(2, 1fr);
-        grid-template-rows: repeat(2, 1fr);
+        padding: 10px 12px;
+        gap: 6px;
     }
 
     .tab-btn {
-        padding: 14px 8px;
-        font-size: 0.85rem;
-        white-space: normal;
-        line-height: 1.3;
+        padding: 10px 14px;
+        font-size: 0.82rem;
+        white-space: nowrap;
+    }
+
+    .user-profile-panel {
+        padding: 10px 12px 12px;
+    }
+
+    .user-profile-field {
+        min-width: 0;
+        flex: 1 1 100%;
+    }
+
+    .user-profile-select {
+        max-width: none;
     }
 
     .tab-content {
@@ -1349,13 +1733,12 @@ h3 {
     }
 
     nav.tabs {
-        grid-template-columns: 1fr;
-        grid-template-rows: repeat(4, 1fr);
+        padding: 8px 10px;
     }
 
     .tab-btn {
-        padding: 12px;
-        font-size: 0.8rem;
+        padding: 9px 12px;
+        font-size: 0.78rem;
     }
 
     .content-box {
