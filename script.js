@@ -16,9 +16,11 @@ let currentVolunteerHoursPending = 0;
 let currentVolunteerHoursApprovedV2 = 0; // Voluntariat Intern/Extern approved
 let currentVolunteerHoursPendingV2 = 0; // Voluntariat Intern/Extern pending
 let pendingParticipationsForOwner = []; // Owner-only: per-activity pending hours records
+let pendingPresenceApprovalsForIncharge = []; // rows from Participari awaiting organiser decision
 
 // Activity modal: organiser + participants selected from Voluntari pool
 let activityOrganiserSelectedEmail = '';
+let activityInchargeSelectedEmail = '';
 let activitySelectedParticipantEmails = []; // array of lowercased emails
 let quickJoinActivityRef = null; // activity opened from "Join" on Current Activities card
 
@@ -288,6 +290,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     await setupAuthUI(user);
 
     await loadData();
+    await loadPendingPresenceApprovalsForCurrentUser();
     setupTabs();
     setupForms();
     renderAll();
@@ -344,6 +347,9 @@ async function loadActivitiesFromSupabase() {
         }
 
         const rows = await res.json();
+        if (rows && rows.length > 0) {
+            activityInchargeColumnAvailable = Object.prototype.hasOwnProperty.call(rows[0], ACTIVITY_INCHARGE_COLUMN);
+        }
 
         // Map Supabase rows back into our in-memory format
         currentActivities = rows.map(row => {
@@ -361,6 +367,8 @@ async function loadActivitiesFromSupabase() {
                 date: row.Data || new Date().toISOString().split('T')[0],
                 hours: parseFloat(row.Ore) || 0,
                 organiser: row.Organizatori || '',
+                incharge: row[ACTIVITY_INCHARGE_COLUMN] || row.Organizatori || '',
+                inchargeEmail: '',
                 location: row.Locatie || '',
                 timeInterval: row["Ora Organizarii"] || '', // Time interval when activity is hosted
                 specialChecklistName: row[ACTIVITY_SPECIAL_CHECKLIST_NAME_COLUMN] || '',
@@ -424,6 +432,9 @@ const SUPABASE_VOLUNTEER_TABLE = "Voluntari";
 const SUPABASE_CHECKLIST_TABLE = "ChecklistACTIVITYS";
 // New: per-activity participation approvals (create this table in Supabase)
 const SUPABASE_PARTICIPATION_TABLE = "Participari";
+const PARTICIPATION_ORGANISER_COLUMN = "Organiser";
+const PARTICIPATION_ORGANISER_APPROVED_COLUMN_PRIMARY = "Organiser Aproved";
+const PARTICIPATION_ORGANISER_APPROVED_COLUMN_FALLBACK = "OrganiserApproved";
 // Column names for checklist table (must match Supabase exactly)
 const CHECKLIST_NAME_COLUMN = "CHECKLISTactivitate NAME";
 const CHECKLIST_FINISHED_COLUMN = "Finisshed list";
@@ -432,6 +443,45 @@ const CHECKLIST_REQUIRED_2_COLUMN = "Required 2";
 // Extra column in Activitati to remember which checklist task this activity belongs to
 // You need to create this text column in Supabase table "Activitati".
 const ACTIVITY_SPECIAL_CHECKLIST_NAME_COLUMN = "SpecialChecklistName";
+const ACTIVITY_INCHARGE_COLUMN = "Responsabil";
+let activityInchargeColumnAvailable = false; // enable only when detected in loaded rows
+
+function getOrganiserApprovalStatus(row) {
+    return String(
+        row?.[PARTICIPATION_ORGANISER_APPROVED_COLUMN_PRIMARY] ??
+        row?.[PARTICIPATION_ORGANISER_APPROVED_COLUMN_FALLBACK] ??
+        ''
+    ).trim();
+}
+
+async function resolveVolunteerEmail(identifier) {
+    const raw = String(identifier || '').trim();
+    if (!raw) return '';
+    if (raw.includes('@')) return raw.toLowerCase();
+
+    const cached = (allVolunteers || []).find(v =>
+        String(v?.NumeComplet || '').trim().toLowerCase() === raw.toLowerCase()
+    );
+    if (cached?.Email) return String(cached.Email).trim().toLowerCase();
+
+    try {
+        const res = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_VOLUNTEER_TABLE}?select=Email&NumeComplet=eq.${encodeURIComponent(raw)}&limit=1`, {
+            method: 'GET',
+            headers: {
+                'apikey': SUPABASE_KEY,
+                'Authorization': `Bearer ${SUPABASE_KEY}`,
+                'Content-Type': 'application/json',
+            },
+        });
+        if (!res.ok) return '';
+        const rows = await res.json();
+        const email = rows?.[0]?.Email;
+        return email ? String(email).trim().toLowerCase() : '';
+    } catch (e) {
+        console.error('Error resolving volunteer email', e);
+        return '';
+    }
+}
 
 // Load checklist activities from Supabase (ChecklistACTIVITYS)
 async function loadChecklistFromSupabase() {
@@ -593,6 +643,9 @@ function setupActivityVolunteerPickers() {
     const organiserInput = document.getElementById('activity-organiser');
     const organiserEmailInput = document.getElementById('activity-organiser-email');
     const organiserDropdown = document.getElementById('activity-organiser-dropdown');
+    const inchargeInput = document.getElementById('activity-incharge');
+    const inchargeEmailInput = document.getElementById('activity-incharge-email');
+    const inchargeDropdown = document.getElementById('activity-incharge-dropdown');
 
     const participantSearch = document.getElementById('activity-participants-search');
     const participantsEmailsInput = document.getElementById('activity-participants-emails');
@@ -600,6 +653,7 @@ function setupActivityVolunteerPickers() {
     const selectedBox = document.getElementById('activity-participants-selected');
 
     if (!organiserInput || !organiserEmailInput || !organiserDropdown) return;
+    if (!inchargeInput || !inchargeEmailInput || !inchargeDropdown) return;
     if (!participantSearch || !participantsEmailsInput || !participantsDropdown || !selectedBox) return;
 
     function normalizeEmail(email) {
@@ -683,6 +737,11 @@ function setupActivityVolunteerPickers() {
             activityOrganiserSelectedEmail = email;
             organiserEmailInput.value = email;
             organiserInput.value = name || email;
+            if (!inchargeEmailInput.value && !inchargeInput.value) {
+                activityInchargeSelectedEmail = email;
+                inchargeEmailInput.value = email;
+                inchargeInput.value = name || email;
+            }
         });
         organiserDropdown.classList.add('open');
     });
@@ -705,6 +764,38 @@ function setupActivityVolunteerPickers() {
 
     organiserInput.addEventListener('blur', () => {
         setTimeout(() => organiserDropdown.classList.remove('open'), 150);
+    });
+
+    inchargeInput.addEventListener('focus', async () => {
+        if (!isOwner) return;
+        if (!allVolunteers || allVolunteers.length === 0) {
+            await loadAllVolunteersForOwner();
+        }
+        renderVolunteerDropdown(inchargeDropdown, inchargeInput.value, ({ email, name }) => {
+            activityInchargeSelectedEmail = email;
+            inchargeEmailInput.value = email;
+            inchargeInput.value = name || email;
+        });
+        inchargeDropdown.classList.add('open');
+    });
+
+    inchargeInput.addEventListener('input', async () => {
+        if (!isOwner) return;
+        if (!allVolunteers || allVolunteers.length === 0) {
+            await loadAllVolunteersForOwner();
+        }
+        activityInchargeSelectedEmail = '';
+        inchargeEmailInput.value = '';
+        renderVolunteerDropdown(inchargeDropdown, inchargeInput.value, ({ email, name }) => {
+            activityInchargeSelectedEmail = email;
+            inchargeEmailInput.value = email;
+            inchargeInput.value = name || email;
+        });
+        inchargeDropdown.classList.add('open');
+    });
+
+    inchargeInput.addEventListener('blur', () => {
+        setTimeout(() => inchargeDropdown.classList.remove('open'), 150);
     });
 
     participantSearch.addEventListener('focus', async () => {
@@ -833,17 +924,20 @@ async function syncActivityToSupabase(type, activity) {
             Ore: activity.hours,
             Locatie: activity.location || null,
             // Match Supabase column name exactly
-            Organizatori: activity.organiser || null,
+            Organizatori: activity.organiser || activity.incharge || null,
             "Ora Organizarii": activity.timeInterval || null,
             Participanti: activity.participantsText || null,
             [ACTIVITY_DEPARTMENT_COLUMN]: activity.departmentsText != null ? activity.departmentsText : null,
             // Optional link to checklist task (create this column in Supabase)
             [ACTIVITY_SPECIAL_CHECKLIST_NAME_COLUMN]: activity.specialChecklistName || null
         };
+        if (activityInchargeColumnAvailable !== false) {
+            payload[ACTIVITY_INCHARGE_COLUMN] = activity.incharge || activity.organiser || null;
+        }
 
         console.log('Sending activity to Supabase:', payload);
 
-        const res = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_ACTIVITY_TABLE}?select=*`, {
+        let res = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_ACTIVITY_TABLE}?select=*`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -856,8 +950,29 @@ async function syncActivityToSupabase(type, activity) {
 
         if (!res.ok) {
             const text = await res.text();
-            console.error('Supabase insert failed', res.status, text);
-            return null;
+            // fallback if Responsabil column is not present yet
+            const fallbackPayload = { ...payload };
+            delete fallbackPayload[ACTIVITY_INCHARGE_COLUMN];
+            if ((text || '').includes(ACTIVITY_INCHARGE_COLUMN)) {
+                activityInchargeColumnAvailable = false;
+            }
+            res = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_ACTIVITY_TABLE}?select=*`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'apikey': SUPABASE_KEY,
+                    'Authorization': `Bearer ${SUPABASE_KEY}`,
+                    'Prefer': 'return=representation'
+                },
+                body: JSON.stringify(fallbackPayload)
+            });
+            if (!res.ok) {
+                const text2 = await res.text();
+                console.error('Supabase insert failed', res.status, text, text2);
+                return null;
+            }
+        } else if (activityInchargeColumnAvailable == null) {
+            activityInchargeColumnAvailable = true;
         }
 
         const data = await res.json();
@@ -1226,11 +1341,16 @@ function openActivityModal(type) {
     setDefaultDate();
 
     activityOrganiserSelectedEmail = '';
+    activityInchargeSelectedEmail = '';
     activitySelectedParticipantEmails = [];
     const organiserEmailInput = document.getElementById('activity-organiser-email');
     if (organiserEmailInput) organiserEmailInput.value = '';
     const organiserDropdown = document.getElementById('activity-organiser-dropdown');
     if (organiserDropdown) organiserDropdown.innerHTML = '';
+    const inchargeEmailInput = document.getElementById('activity-incharge-email');
+    if (inchargeEmailInput) inchargeEmailInput.value = '';
+    const inchargeDropdown = document.getElementById('activity-incharge-dropdown');
+    if (inchargeDropdown) inchargeDropdown.innerHTML = '';
     const participantsEmailsInput = document.getElementById('activity-participants-emails');
     if (participantsEmailsInput) participantsEmailsInput.value = '';
     const participantsDropdown = document.getElementById('activity-participants-dropdown');
@@ -1342,6 +1462,7 @@ async function performJoinActivity(activity, availability) {
     await markChecklistDoneForActivity(activity);
     await loadActivitiesFromSupabase();
     await loadCurrentVolunteerHoursFromSupabase();
+    await loadPendingPresenceApprovalsForCurrentUser();
     renderAll();
     return true;
 }
@@ -1487,8 +1608,10 @@ async function addActivity(type) {
     const description = document.getElementById('activity-description').value;
     const date = document.getElementById('activity-date').value;
     const hours = parseFloat(document.getElementById('activity-hours').value);
-    const organiser = document.getElementById('activity-organiser').value;
+    const organiser = (document.getElementById('activity-organiser').value || '').trim();
     const organiserEmail = (document.getElementById('activity-organiser-email')?.value || '').trim().toLowerCase();
+    const incharge = (document.getElementById('activity-incharge').value || '').trim();
+    const inchargeEmail = (document.getElementById('activity-incharge-email')?.value || '').trim().toLowerCase();
     const location = document.getElementById('activity-location').value;
     const timeInterval = document.getElementById('activity-time-interval').value;
 
@@ -1513,12 +1636,20 @@ async function addActivity(type) {
         .filter(d => DEPARTAMENT_OPTIONS.includes(d));
     const departmentsText = departmentsToStorageString(selectedDepts);
 
+    const finalOrganiser = organiser || incharge;
+    if (!finalOrganiser) {
+        alert('Please select an Organiser (or Person in charge).');
+        return;
+    }
+
     const activity = {
         name,
         description,
         date,
         hours,
-        organiser: organiser || '',
+        organiser: finalOrganiser,
+        incharge: incharge || finalOrganiser,
+        inchargeEmail: inchargeEmail || organiserEmail || '',
         location: location || '',
         timeInterval: timeInterval || '',
         isChecklistSpecial,
@@ -1769,6 +1900,7 @@ function renderAll() {
     renderQuickVolunteerHours();
     renderCurrentActivities();
     renderMyActivities();
+    renderMyActivitys();
     renderTotalHours();
     renderPayments();
     renderChecklist();
@@ -1887,6 +2019,138 @@ function renderMyActivities() {
             </div>
         </div>
     `).join('');
+}
+
+async function loadPendingPresenceApprovalsForCurrentUser() {
+    const user = getCurrentUser();
+    const email = (user && user.email) ? user.email.trim().toLowerCase() : '';
+    const displayName =
+        (user && user.user_metadata && (user.user_metadata.name || user.user_metadata.full_name))
+            ? String(user.user_metadata.name || user.user_metadata.full_name).trim().toLowerCase()
+            : '';
+    if (!email && !displayName) {
+        pendingPresenceApprovalsForIncharge = [];
+        return;
+    }
+
+    try {
+        const encodedStatusCol = encodeURIComponent(PARTICIPATION_ORGANISER_APPROVED_COLUMN_PRIMARY);
+        const who = encodeURIComponent(email || displayName);
+
+        let res = await fetch(
+            `${SUPABASE_URL}/rest/v1/${SUPABASE_PARTICIPATION_TABLE}?select=id,VolunteerEmail,ActivityName,Hours,Status,${encodedStatusCol},${PARTICIPATION_ORGANISER_COLUMN}&${PARTICIPATION_ORGANISER_COLUMN}=eq.${who}&${encodedStatusCol}=eq.Pending&Status=eq.Pending`,
+            {
+                method: 'GET',
+                headers: {
+                    'apikey': SUPABASE_KEY,
+                    'Authorization': `Bearer ${SUPABASE_KEY}`,
+                    'Content-Type': 'application/json',
+                },
+            }
+        );
+
+        if (!res.ok) {
+            res = await fetch(
+                `${SUPABASE_URL}/rest/v1/${SUPABASE_PARTICIPATION_TABLE}?select=id,VolunteerEmail,ActivityName,Hours,Status,${PARTICIPATION_ORGANISER_APPROVED_COLUMN_FALLBACK},${PARTICIPATION_ORGANISER_COLUMN}&${PARTICIPATION_ORGANISER_COLUMN}=eq.${who}&${PARTICIPATION_ORGANISER_APPROVED_COLUMN_FALLBACK}=eq.Pending&Status=eq.Pending`,
+                {
+                    method: 'GET',
+                    headers: {
+                        'apikey': SUPABASE_KEY,
+                        'Authorization': `Bearer ${SUPABASE_KEY}`,
+                        'Content-Type': 'application/json',
+                    },
+                }
+            );
+        }
+
+        if (!res.ok && displayName && displayName !== email) {
+            const whoByName = encodeURIComponent(displayName);
+            res = await fetch(
+                `${SUPABASE_URL}/rest/v1/${SUPABASE_PARTICIPATION_TABLE}?select=id,VolunteerEmail,ActivityName,Hours,Status,${PARTICIPATION_ORGANISER_APPROVED_COLUMN_FALLBACK},${PARTICIPATION_ORGANISER_COLUMN}&${PARTICIPATION_ORGANISER_COLUMN}=eq.${whoByName}&${PARTICIPATION_ORGANISER_APPROVED_COLUMN_FALLBACK}=eq.Pending&Status=eq.Pending`,
+                {
+                    method: 'GET',
+                    headers: {
+                        'apikey': SUPABASE_KEY,
+                        'Authorization': `Bearer ${SUPABASE_KEY}`,
+                        'Content-Type': 'application/json',
+                    },
+                }
+            );
+        }
+
+        if (!res.ok) {
+            pendingPresenceApprovalsForIncharge = [];
+            return;
+        }
+        pendingPresenceApprovalsForIncharge = await res.json();
+    } catch (err) {
+        console.error('Error loading presence approvals for organiser', err);
+        pendingPresenceApprovalsForIncharge = [];
+    }
+}
+
+function renderMyActivitys() {
+    const host = document.getElementById('my-activitys-list');
+    if (!host) return;
+    if (!pendingPresenceApprovalsForIncharge.length) {
+        host.innerHTML = '<div class="empty-state"><p>No pending presence approvals assigned to you.</p></div>';
+        return;
+    }
+
+    host.innerHTML = pendingPresenceApprovalsForIncharge.map(item => `
+        <div class="hours-item" style="padding: 10px 12px; margin: 6px 0;">
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+                <div style="min-width:0;">
+                    <div style="font-weight: 600; color: var(--dark-gray);">${escapeHtml(item.ActivityName || 'Activity')}</div>
+                    <div style="font-size:0.8rem; color: var(--gray); margin-top:2px;">
+                        Volunteer: <strong>${escapeHtml(item.VolunteerEmail || '—')}</strong> · ${Number(item.Hours || 0).toFixed(1)}h
+                    </div>
+                </div>
+                <div style="display:flex; gap:8px; flex-shrink:0;">
+                    <button class="volunteer-rank-add-btn" style="padding: 6px 10px;" onclick="setOrganiserApproval(${item.id}, 'Acepted')">Accept</button>
+                    <button class="volunteer-rank-add-btn" style="padding: 6px 10px; background: rgba(244,67,54,0.12); border: 2px solid rgba(244,67,54,0.25);" onclick="setOrganiserApproval(${item.id}, 'Declined')">Decline</button>
+                </div>
+            </div>
+        </div>
+    `).join('');
+}
+
+async function setOrganiserApproval(participationId, nextStatus) {
+    if (!participationId) return;
+    showLoading('Saving presence status...');
+    try {
+        let res = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_PARTICIPATION_TABLE}?id=eq.${participationId}`, {
+            method: 'PATCH',
+            headers: {
+                'apikey': SUPABASE_KEY,
+                'Authorization': `Bearer ${SUPABASE_KEY}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ [PARTICIPATION_ORGANISER_APPROVED_COLUMN_PRIMARY]: nextStatus })
+        });
+        if (!res.ok) {
+            res = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_PARTICIPATION_TABLE}?id=eq.${participationId}`, {
+                method: 'PATCH',
+                headers: {
+                    'apikey': SUPABASE_KEY,
+                    'Authorization': `Bearer ${SUPABASE_KEY}`,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ [PARTICIPATION_ORGANISER_APPROVED_COLUMN_FALLBACK]: nextStatus })
+            });
+        }
+        if (!res.ok) {
+            const txt = await res.text();
+            console.error('Failed to set organiser approval', res.status, txt);
+            alert('Could not save organiser approval.');
+            return;
+        }
+        await loadPendingPresenceApprovalsForCurrentUser();
+        if (isOwner) await loadPendingParticipationsForOwner();
+        renderAll();
+    } finally {
+        hideLoading();
+    }
 }
 
 // Render total hours
@@ -2202,7 +2466,81 @@ async function forceAddParticipantToActivitySupabase(activity, rawIdentifier) {
             return;
         }
 
+        // Also create a pending participation row so it appears in "My activitys" approvals.
+        try {
+            const volunteerEmail = await resolveVolunteerEmail(identifier);
+
+            if (volunteerEmail) {
+                // Avoid duplicate pending records for same volunteer + same activity
+                const dupRes = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_PARTICIPATION_TABLE}?select=id&VolunteerEmail=eq.${encodeURIComponent(volunteerEmail)}&ActivityId=eq.${activity.supabase_id}&Status=eq.Pending`, {
+                    method: 'GET',
+                    headers: {
+                        'apikey': SUPABASE_KEY,
+                        'Authorization': `Bearer ${SUPABASE_KEY}`,
+                        'Content-Type': 'application/json',
+                    },
+                });
+                let hasDuplicate = false;
+                if (dupRes.ok) {
+                    const dupRows = await dupRes.json();
+                    hasDuplicate = Array.isArray(dupRows) && dupRows.length > 0;
+                }
+
+                if (!hasDuplicate) {
+                    const organiserEmail = await resolveVolunteerEmail(activity.inchargeEmail || activity.incharge || activity.organiser);
+                    let participationPayload = {
+                        VolunteerEmail: volunteerEmail,
+                        ActivityId: activity.supabase_id,
+                        ActivityName: activity.name || '',
+                        Hours: Number(activity.hours || 0),
+                        Status: 'Pending',
+                        [PARTICIPATION_ORGANISER_COLUMN]: organiserEmail || null,
+                        [PARTICIPATION_ORGANISER_APPROVED_COLUMN_PRIMARY]: 'Pending'
+                    };
+
+                    let pRes = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_PARTICIPATION_TABLE}?select=*`, {
+                        method: 'POST',
+                        headers: {
+                            'apikey': SUPABASE_KEY,
+                            'Authorization': `Bearer ${SUPABASE_KEY}`,
+                            'Content-Type': 'application/json',
+                            'Prefer': 'return=representation'
+                        },
+                        body: JSON.stringify(participationPayload)
+                    });
+
+                    if (!pRes.ok) {
+                        participationPayload = {
+                            ...participationPayload,
+                            [PARTICIPATION_ORGANISER_APPROVED_COLUMN_FALLBACK]: 'Pending'
+                        };
+                        delete participationPayload[PARTICIPATION_ORGANISER_APPROVED_COLUMN_PRIMARY];
+                        pRes = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_PARTICIPATION_TABLE}?select=*`, {
+                            method: 'POST',
+                            headers: {
+                                'apikey': SUPABASE_KEY,
+                                'Authorization': `Bearer ${SUPABASE_KEY}`,
+                                'Content-Type': 'application/json',
+                                'Prefer': 'return=representation'
+                            },
+                            body: JSON.stringify(participationPayload)
+                        });
+                    }
+
+                    if (!pRes.ok) {
+                        const pText = await pRes.text();
+                        console.error('Failed to create pending participation for force-added user', pRes.status, pText);
+                    }
+                }
+            } else {
+                console.warn('Force-added participant could not be mapped to email, skipped Participari insert:', identifier);
+            }
+        } catch (e) {
+            console.error('Error creating participation for force-added participant', e);
+        }
+
         await loadActivitiesFromSupabase();
+        await loadPendingPresenceApprovalsForCurrentUser();
         renderAll();
 
         // Re-open participants modal with updated activity data
@@ -2822,7 +3160,7 @@ async function approveVolunteerPendingHours(volunteerId) {
 async function loadPendingParticipationsForOwner() {
     if (!isOwner) return;
     try {
-        const res = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_PARTICIPATION_TABLE}?select=id,VolunteerEmail,ActivityId,ActivityName,Hours,Status&Status=eq.Pending`, {
+        let res = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_PARTICIPATION_TABLE}?select=id,VolunteerEmail,ActivityId,ActivityName,Hours,Status,${encodeURIComponent(PARTICIPATION_ORGANISER_APPROVED_COLUMN_PRIMARY)}&Status=eq.Pending&${encodeURIComponent(PARTICIPATION_ORGANISER_APPROVED_COLUMN_PRIMARY)}=eq.Acepted`, {
             method: 'GET',
             headers: {
                 'apikey': SUPABASE_KEY,
@@ -2831,8 +3169,19 @@ async function loadPendingParticipationsForOwner() {
             },
         });
         if (!res.ok) {
-            pendingParticipationsForOwner = [];
-            return;
+            // fallback to alternative no-space column name
+            res = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_PARTICIPATION_TABLE}?select=id,VolunteerEmail,ActivityId,ActivityName,Hours,Status,${PARTICIPATION_ORGANISER_APPROVED_COLUMN_FALLBACK}&Status=eq.Pending&${PARTICIPATION_ORGANISER_APPROVED_COLUMN_FALLBACK}=eq.Acepted`, {
+                method: 'GET',
+                headers: {
+                    'apikey': SUPABASE_KEY,
+                    'Authorization': `Bearer ${SUPABASE_KEY}`,
+                    'Content-Type': 'application/json',
+                },
+            });
+            if (!res.ok) {
+                pendingParticipationsForOwner = [];
+                return;
+            }
         }
         pendingParticipationsForOwner = await res.json();
     } catch (err) {
@@ -2850,14 +3199,17 @@ async function createPendingParticipationForCurrentUser(activity) {
     if (!hours) return;
 
     try {
-        const payload = {
+        const organiserEmail = await resolveVolunteerEmail(activity.inchargeEmail || activity.incharge || activity.organiser);
+        let payload = {
             VolunteerEmail: email,
             ActivityId: activity.supabase_id,
             ActivityName: activity.name || '',
             Hours: hours,
-            Status: 'Pending'
+            Status: 'Pending',
+            [PARTICIPATION_ORGANISER_COLUMN]: organiserEmail || null,
+            [PARTICIPATION_ORGANISER_APPROVED_COLUMN_PRIMARY]: 'Pending'
         };
-        const res = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_PARTICIPATION_TABLE}?select=*`, {
+        let res = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_PARTICIPATION_TABLE}?select=*`, {
             method: 'POST',
             headers: {
                 'apikey': SUPABASE_KEY,
@@ -2869,8 +3221,27 @@ async function createPendingParticipationForCurrentUser(activity) {
         });
         if (!res.ok) {
             const text = await res.text();
-            console.error('Failed to create participation record', res.status, text);
-            return;
+            // fallback to OrganiserApproved if column with space does not exist
+            payload = {
+                ...payload,
+                [PARTICIPATION_ORGANISER_APPROVED_COLUMN_FALLBACK]: 'Pending'
+            };
+            delete payload[PARTICIPATION_ORGANISER_APPROVED_COLUMN_PRIMARY];
+            res = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_PARTICIPATION_TABLE}?select=*`, {
+                method: 'POST',
+                headers: {
+                    'apikey': SUPABASE_KEY,
+                    'Authorization': `Bearer ${SUPABASE_KEY}`,
+                    'Content-Type': 'application/json',
+                    'Prefer': 'return=representation'
+                },
+                body: JSON.stringify(payload)
+            });
+            if (!res.ok) {
+                const text2 = await res.text();
+                console.error('Failed to create participation record', res.status, text, text2);
+                return;
+            }
         }
     } catch (err) {
         console.error('Error creating participation record', err);
@@ -3110,5 +3481,6 @@ window.changeVolunteerDepartament = changeVolunteerDepartament;
 window.approveVolunteerPendingHours = approveVolunteerPendingHours;
 window.approveParticipation = approveParticipation;
 window.declineParticipation = declineParticipation;
+window.setOrganiserApproval = setOrganiserApproval;
 window.openQuickJoinModal = openQuickJoinModal;
 
